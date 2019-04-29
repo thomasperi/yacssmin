@@ -5,66 +5,51 @@ namespace ThomasPeri\YaCSSMin;
  * Yet Another CSS Minifier
  */
 class Minifier {
-
-	private static $patterns = [
-		// Whitespace becomes a single space.
-		'#\s+#s' => ' ',
-	
-		// Comments get stripped.
-		'#/\*.*?\*/#s' => false,
-	
-		// url(...) values should stay exactly as they are.
-		// (Case-insensitive so as not to accidentally fix broken CSS.)
-		'#url\(.*?\)#is' => true,
-	
-		// Quoted strings should be used as-is.
-		'#([\'"])(\\\\?.)*?\1#s' => true,
-		
-		// A colon.
-		'#:\s*#s' => ['colon'],
-		
-		// An @-rule
-		'#@\w+#' => ['at_rule'],
-
-		// One or more semicolons, each optionally followed by whitespace.
-		'#(;\s*)+#s'  => ['semicolon'],
-
-		// Other delimiters
-		'#\(\s*#s' => ['open_paren'],
-		'#\)#'     => ['close_paren'], // Might need its whitespace so don't trap it here.
-		'#\{\s*#s' => ['open_brace'],
-		'#\}\s*#s' => ['close_brace'],
-	];
-	
-	private
-		$input,
-		$output = [],
-		$context = [];
-	
 	/**
 	 * Minify some CSS code.
 	 * @param string $css The CSS code to minify.
 	 * @returns string
 	 */
 	static function minify($css) {
-		return (new self($css))->minify_instance();
-	}
+		$min = new self();
+		
+		// Wrap it in spaces so we don't have to check for the
+		// beginning and end of the file.
+		$tokens = $min->tokenize(' ' . $css . ' '); 
+		$tokens = $min->blocks($tokens);
+		$tokens = $min->comments($tokens);
+		$tokens = $min->spaces($tokens);
+		$tokens = $min->expressions($tokens);
 
-	private function __construct($input) {
-		$this->input = $input;
-	}
-
-	private function truthy($value) {
-		return $value || $value === '0';
+		return trim(implode('', $tokens));
 	}
 	
-	private function minify_instance() {
-		$input = &$this->input;
-		$output = &$this->output;
-		
-		$len = strlen($input);
+	private static
+		$safe = ['{', '}', ';', ',', ' '],
+		$patterns = [
+			// Contiguous whitespace becomes a single space.
+			'#\s+#s' => ' ',
+
+			// The rules for whether a comment is considered nothing or
+			// whitespace are complicated, so for the first pass, just
+			// convert all comments to empty comments.
+			'#(/\*.*?\*/)+#s' => '/**/',
+	
+			// Quoted strings stay as they are.
+			'#([\'"])(\\\\?.)*?\1#s' => true,
+	
+			// Words including hyphens stay as they are.
+			'#[\w-]+#' => true,
+
+			// Isolate a few individual characters.
+			'#[@:;(){}]#' => true,
+		];
+	
+	private function tokenize($css) {
+		$tokens = [];
+
+		$len = strlen($css);
 		$offset = 0;
-		
 		do {
 			// Set some initial values before each `do` iteration.
 			$match = '';
@@ -74,7 +59,7 @@ class Minifier {
 			// Match each pattern starting at the offset and use the earliest-occurring one.
 			foreach (self::$patterns as $pattern => $val) {
 				if (
-					preg_match($pattern, $input, $matches, PREG_OFFSET_CAPTURE, $offset) &&
+					preg_match($pattern, $css, $matches, PREG_OFFSET_CAPTURE, $offset) &&
 					$matches[0][1] < $start
 				) {
 					// Update those values when we find a better match.
@@ -82,7 +67,7 @@ class Minifier {
 					$start = $matches[0][1];
 					$action = $val;
 					
-					// No need to look further if it's as far back as it can be.
+					// No need to keep looking if it's as far back as it can be.
 					if ($start === $offset) {
 						break;
 					}
@@ -90,214 +75,233 @@ class Minifier {
 			}
 
 			// Keep whatever came before the match (or at the end of
-			// the input, if nothing matched).
-			$unmatched = substr($input, $offset, $start - $offset);
-			if ($this->truthy($unmatched)) {
-				$output[] = $unmatched;
+			// the css, if nothing matched).
+			$unmatched = substr($css, $offset, $start - $offset);
+			if ($unmatched !== '') {
+				$tokens[] = $unmatched;
 			}
 			
 			// Process whatever was matched and add it to the result.
-			if (is_array($action)) {
-				$method = $action[0];
-				$result = $this->$method($match);
-				if ($result) {
-					$output[] = $result;
-				}
+			if (is_string($action)) {
+				$tokens[] = $action;
 
-			} else if (is_string($action)) {
-				$output[] = $action;
-
-			} else if (true === $action) {
-				$output[] = $match;
+			} else if ($action === true) {
+				$tokens[] = $match;
 			}
 			
 			// Move the offset to the end of the match.
 			$offset = $start + strlen($match);
 			
 			// Keep going as long as something was matched.
-		} while ($match);
+		} while ($match !== '');
 		
-		return trim(implode('', $output));
+		return $tokens;
 	}
 	
-	private function whitespace($match) {
-		// Remove previous matches from the end of the output until we
-		// get a non-whitespace one or we reach the beginning.
-		while (!$this->truthy($prev) && $this->output) {
-			$prev = trim(array_pop($this->output));
+	private function blocks(&$input) {
+		// Trace backwards through the input, looking for closing braces.
+		$output = [];
+		while ($input) {
+			$token = array_pop($input);
+			if ($token === '}') {
+				$empty = $this->blocks_tail($input, $output);
+			} else {
+				$output[] = $token;
+			}
 		}
+		return array_reverse($output);
+	}
+	
+	private function blocks_tail(&$input, &$output) {
+		// When found, pop off semicolons, spaces, and comments
+		// until we reach something else.
+		while ($input) {
+			$token = array_pop($input);
+			switch ($token) {
+				case ';':
+				case ' ':
+				case '/**/':
+					break;
 
-		// If the last thing that was popped wasn't whitespace,
-		// put it back.
-		if ($this->truthy($prev)) {
-			$this->output[] = $prev;
-		}
-		
-		// Trim the match itself.
-		return trim($match);
-	}
-	
-	private function at_rule($match) {
-		$this->context[] = '@';
-		return $match;
-	}
-	
-	private function colon($match) {
-		// Directly inside a media expression, just remove whitespace
-		// around the colon and be done with it.
-		if (end($this->context) === '(') {
-			return $this->whitespace($match);
-		}
-		
-		// In other contexts, enter a new context indicating that this 
-		// might be a name-value pair. A close brace or a semicolon exit
-		// this colon context.
-		$this->context[] = ':';
+				// If that something else is a closing brace,
+				// it's a nested block. process that one recursively
+				// before proceeding to the next, 'cause it might be
+				// empty too.
+				case '}':
+					$this->blocks_tail($input, $output);
+					break;
 
-		// If it has whitespace, trim it and append a single space.
-		if (strlen($match) > 1) {
-			return trim($match) . ' ';
+				// If that something else is an opening brace,
+				// this block is empty, so don't push any output.
+				case '{':
+					$this->blocks_empty($input, $output);
+					return;
+
+				// If anything else is found, we're done optimizing the
+				// tail end of this block. Push the closing brace, then
+				// put back whatever token was popped off the input.
+				default:
+					$output[] = '}';
+					$input[] = $token;
+					return;
+			}
 		}
-		
-		// Otherwise, return it as-is.
-		return $match;
 	}
 	
-	private function colon_pair() {
-		// If we encounter a close brace in colon context, this must be
-		// a name-value pair, and so the colon should be de-whitespaced.
-		if (end($this->context) === ':') {
-			// Not in colon context anymore.
-			array_pop($this->context);
+	private function blocks_empty(&$input, &$output) {
+		// Pop things off until we find a semicolon or an open or
+		// close brace. (Don't pop whatever is found.)
+		while ($input) {
+			switch (end($input)) {
+				case ';':
+				case '{':
+				case '}':
+					return;
+				default:
+					array_pop($input);
+			}
+		}
+	}
+	
+	private function comments(&$input) {
+		$output = [];
+		$next = array_pop($input);
+		while ($next !== null) {
+			$prev = end($output);
+			$token = $next;
+			$next = array_pop($input);
 			
-			// Stash a reference.
-			$output = &$this->output;
-			
-			// Find the most recent colon.
-			for ($i = count($output) - 1; $i >= 0; $i--) {
-				switch ($output[$i]) {
-					case ':':
-					case ': ':
-						break 2;
+			// Whenever there's a comment (emptied by the tokenizer),
+			// decide whether to keep or discard it.
+			if ($token === '/**/') {
+				// If either adjacent token is a safe one, discard the comment.
+				if (in_array($prev, self::$safe) || in_array($next, self::$safe)) {
+					continue;
 				}
 			}
 			
-			// Remove the colon and everything after it.
-			$tail = array_splice($output, $i);
-			
-			// Remove whitespace before the colon.
-			$this->whitespace('');
-			
-			// Add the colon back on.
-			$output[] = ':';
-			
-			// Remove the colon from the tail.
-			array_shift($tail);
-			
-			// Re-attach the remainder of the tail.
-			array_splice($output, count($output), 0, $tail);
+			// Keep tokens that aren't comments,
+			// and comments that don't abut safe characters.
+			$output[] = $token;
 		}
+		return array_reverse($output);
 	}
 
-	private function open_paren($match) {
-		// If this open parenthesis is inside an @-rule...
-		if (end($this->context) === '@') {
-			// ...now we're in a media expression inside the @-rule.
-			$this->context[] = '(';
-			// Remove white space after the paren but not before it.
-			$match = trim($match);
-		}
-		return $match;
-	}
-
-	private function close_paren($match) {
-		// Pop back to the most recent open paren.
-		do {
-			$open = array_pop($this->context);
-		} while ($open && $open !== '(');
-
-		// If this parenthesis is inside an @-rule, this is a media
-		// expression, so remove white space around the paren.
-		if (end($this->context) === '@') {
-			$match = $this->whitespace($match);
-		}
-		
-		return $match;
-	}
-	
-	private function open_brace($match) {
-		// If we were in an @-rule, we're not anymore.
-		if (end($this->context) === '@') {
-			array_pop($this->context);
-		}
-		
-		// Now we're in a block.
-		$this->context[] = '{';
-
-		// Remove whitespace around the brace.
-		return $this->whitespace($match);
-	}
-
-	private function close_brace($match) {
-		// If we're in a colon context, deal with possible name-value pair.
-		$this->colon_pair();
-	
-		// Pop back to the most recent open brace.
-		do {
-			$open = array_pop($this->context);
-		} while ($open && $open !== '{');
-
-		// Remove whitespace around the brace.
-		$match = $this->whitespace($match);
-		
-		// Grab a reference to the output array for conciseness.
-		$output = &$this->output;
-
-		// Remove possible semicolon before the brace.
-		if (end($output) === ';') {
-			array_pop($output);
-		}
-
-		// If the previous match is an open brace, this block has
-		// nothing inside it. Remove both braces (the block), along
-		// with whatever came before it, back to the most recent brace
-		// (open or closed) or semicolon.
-		if (end($output) === '{') {
-			// Remove both braces (the match and the end of the output)
-			$match = '';
-			array_pop($output);
+	private function spaces(&$input) {
+		$output = [];
+		$maybe_decl = false;
+		$next = array_pop($input);
+		while ($next !== null) {
+			$prev = end($output);
+			$token = $next;
+			$next = array_pop($input);
 			
-			// Trace it back to the nearest brace (open or closed) or semicolon.
-			while ($output) {
-				switch (end($output)) {
-					case '{':
-					case '}':
-					case ';';
-						// When one is found, stop.
-						break 2;
-				}
-				// Remove whatever it was that wasn't one of those characters.
-				array_pop($output);
+			// Whenever there's a comment (emptied by the tokenizer),
+			// decide whether to keep or discard it.
+			switch ($token) {
+				case ' ':
+					// Conditions under which to discard the space:
+					if (
+						// If either adjacent token is a safe one:
+						in_array($prev, self::$safe) ||
+						in_array($next, self::$safe) ||
+
+						// At the beginning or end of a set of parens:
+						// (Working tail-to-head, prev is to the right
+						// and next is to the left.)
+						$prev === ')' ||
+						$next === '(' ||
+						
+						// If we might be in a property declaration
+						// and the next or previous token is a colon:
+						($maybe_decl && ($prev === ':' || $next === ':'))
+					) {
+						continue 2;
+					}
+					break;
+				
+				// If something is ending, it might be a property declaration.
+				case ';':
+				case '}':
+					$maybe_decl = true;
+					break;
+				
+				// If a block is beginning, what comes before it is
+				// not a declaration.
+				case '{':
+					$maybe_decl = false;
+					break;
 			}
+			
+			// Keep tokens that aren't spaces,
+			// and spaces that don't satisfy the conditions above.
+			$output[] = $token;
 		}
-		
-		return $match;
+		return array_reverse($output);
 	}
+	
+	private function expressions(&$input) {
+		$output = [];
+		
+		while ($input) {
+			// Find the next @-rule.
+			$pos = array_search('@', $input);
+			if ($pos === false) {
+				break;
+			}
+			// Remove the head of the input and append it to the output.
+			array_splice($output, count($output), 0, array_splice($input, 0, $pos));
+			
+			// Find the end of the @-rule.
+			$count = count($input);
+			$semi = array_search(';', $input);
+			if ($semi === false) {
+				$semi = $count;
+			}
+			$brace = array_search('{', $input);
+			if ($brace === false) {
+				$brace = $count;
+			}
+			$pos = min($semi, $brace);
+			
+			// Splice out the rule and search inside it.
+			$at_rule = array_splice($input, 0, $pos);
+			while ($at_rule) {
+				// Each parenthesis with a space in front of it marks the
+				// beginning of a potential media expression.
+				$open = array_search('(', $at_rule);
+				$close = array_search(')', $at_rule);
+				$len = $close - $open;
+				if ($len <= 0) {
+					break;
+				}
+				
+				// If what came before the paren wasn't a space,
+				// move on to the next paren.
+				if (end($output) !== ' ') {
+					array_splice($output, count($output), 0, array_splice($at_rule, 0, $close));
+					continue;
+				}
 
-	private function semicolon($match) {
-		// If we're in a colon context, deal with possible name-value pair.
-		$this->colon_pair();
-
-		// If we were in an @-rule, we're not anymore.
-		if (end($this->context) === '@') {
-			array_pop($this->context);
+				// Got a suitable paren, so extract the expression from
+				// inside the @-rule.
+				$expr = array_splice($at_rule, $open, $len);
+				
+				// Then, remove the head of the @-rule and append it to
+				// the output.
+				array_splice($output, count($output), 0, array_splice($at_rule, 0, $open));
+				
+				// Now that it's down to just the expression, we can
+				// use a regex to strip spaces around any colons.
+				$output[] = preg_replace('#\s*:\s*#s', ':', implode('', $expr));
+			}
+			
+			// Append the rest of the @-rule onto the output.
+			array_splice($output, count($output), 0, $at_rule);
 		}
-		
-		// Remove whitespace around the brace.
-		$this->whitespace($match);
-		
-		// Return a single semicolon no matter how many there are.
-		return ';';
-	}
 
+		// Append the rest of the input onto the output;
+		array_splice($output, count($output), 0, $input);
+		return $output;
+	}
 }
