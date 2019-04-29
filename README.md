@@ -5,18 +5,17 @@ Yet Another CSS Minifier
 
     $minified_css = \ThomasPeri\YaCSSMin\Minifier::minify($css);
 
-## Goals
-Why write another CSS Minifier? I had a few goals in mind:
+## Why?
+Why write another CSS Minifier? Looking through the known issues with other minifiers, I had a few goals in mind:
 
-* No library dependencies.
-* Small codebase. (~300 lines, 8 KB)
-* Readable and maintainable. Regular expressions used sparingly.
-* Don't break valid CSS even on weird corner cases.
-* Don't accidentally fix broken CSS. It's a source of confusion.
-* Strike a balance between handling the corner cases and keeping things simple.
+* No dependencies on other libraries.
+* Readable and maintainable, using regular expressions only for tokenizing, not for decision-making.
+* Don't break any CSS that works, even if there's crazy stuff in there.
+* Don't "accidentally fix" any broken CSS.
+* Handle corner cases in the simplest way possible, even if it means the output is a few bytes longer than it could be.
 
-## Two Big Challenges
-CSS comments and white space are weird.
+## The Two Big Challenges
+CSS comments and white space are complicated. Half the source code of this minifier deals with how and when to convert them.
 
 ### #1: Comments
 
@@ -32,47 +31,78 @@ In other contexts, a comment is equivalent to whitespace. These two media querie
 
 How do we go about writing rules to match the behavior?
 
-Well, the vast majority of comments you'll actually write aren't going to be inside selectors or media queries, so the minifier doesn't need to optimize for those. And when a comment is where you'd normally put one -- before a selector, or before a declaration -- its context is easy to test for.
+Fortunately, the vast majority of comments you'll actually write aren't going to be inside selectors or media queries, so the minifier doesn't need to optimize for those. It just needs to make sure they keep working the way they do.
 
-It will be adjacent to a space (the beginning or end of the file counts as a space) and/or any of these characters:
+Furthermore, when a comment is where you'd normally put one -- before a selector, or before a declaration -- its context is easy to test for: It will be adjacent to a space (the beginning or end of the file counts as a space) and/or any of these characters:
 
     ,;{}
 
-So that's all YaCSSMin tests for. Comments that meet those criteria get stripped. Comments in weird places get replaced with empty comments, so as far as a web browser is concerned, it's still a comment. The minifier doesn't have to worry about whether it's supposed to be a space or a nothing.
+So that's all YaCSSMin tests for. Comments that meet those criteria get stripped. Comments in other contexts get replaced with *empty* comments, so that as far as a web browser is concerned, it's still a comment. The minifier doesn't have to worry about whether to remove it or replace it with whitespace.
 
+    div/* foo */.bar
+    --- becomes ---
     div/**/.bar
-    @media screen/**/and (min-width: 500px)
+
+    @media screen/* foo */and (min-width: 500px)
+    --- becomes ---
+    @media screen/**/and (min-width:500px)
 
 ### #2: Whitespace
 
 Whitespace in CSS suffers a similar ambiguity. In some contexts it really is ignored, and in others it has meaning. Where should the minifier strip whitespace and where should it not?
 
-Whitespace matters in selectors, like these three lines:
+An example in which all of the whitespace can be stripped:
 
-    div .foo
-    div.foo
-    div. foo
+    .foo {
+        color: red;
+    }
     
-The first two are both valid, but the difference in whitespace causes them to have different results. The third isn't valid and doesn't select anything, but removing the whitespace would accidentally make non-functional CSS functional.
+The above has the exact same meaning as the below:
+    
+    .foo{color:red;}
 
-Whitespace also matters around calc() operators:
+It *does* matter in selectors, like these three lines:
+
+    div :hover
+    div:hover
+    div: hover
+    
+The first two are both valid, but the difference in whitespace is important. Changing the whitespace changes the behavior. The third is a typo and doesn't do anything, but removing the whitespace would accidentally make it do something.
+
+Whitespace also matters around `calc()` operators like `+` and `-`:
 
     calc(500px - (300px + 100px)) /* this works as expected */
     calc(500px - (300px +100px))  /* this doesn't           */
     calc(500px - (300px+100px))   /* neither does this      */
 
-Another example:
+Another example, with a media query:
 
-    @media screen and (min-width: 1000px)
-    @media screen and ( min-width:1000px )
-    @media screen and( min-width:1000px )
+    @media screen and (min-width: 1000px)  /* works        */
+    @media screen and ( min-width:1000px ) /* works        */
+    @media screen and( min-width:1000px )  /* doesn't work */
+    @media screen and(min-width: 1000px)   /* doesn't work */
     
-The first two work, the last one doesn't.
+So here's where YaCSSMin strips whitespace:
 
-Here's where the presence or absence of whitespace is always irrelevant:
+* When it abuts another space, the beginning or end of file, or any of the four characters listed above for comments.
+* When it abuts a colon in a name:value pair. (But not in selectors, where space around colons is meaningful.)
+* After an opening parenthesis or before a closing one.
 
-* When it abuts another space, beginning or end of file, or any of the four characters listed above for comments.
-* When it abuts the colon in a name:value pair inside a media expression or a declaration. Not all colons.
-* At the beginning and end of the *contents* of parentheses.
+Everywhere else -- places where the whitespace might be meaningful -- it just converts contiguous runs of whitespace into single spaces.
 
-And so that's where YaCSSMin strips whitespace. Everywhere else -- places where the whitespace could be meaningful, like in most parts of a selector -- it just converts contiguous runs of whitespace into single spaces.
+## Other Features (and Non-Features)
+
+Here's some other stuff it removes:
+
+* Empty blocks (and whatever rule the block applies to)
+* Unnecessary semicolons
+
+Stuff it *doesn't* do yet:
+
+* Shorten color names and hex codes
+
+And stuff it will probably never do:
+
+* Remove units from zeroes
+
+I'm reluctant to remove units from zeroes. Even though there is a finite number of places where units are necessary on zeroes (`calc()` expressions), there are also many places where units should never be used, such as `z-index`, `opacity`, and a lot of `flex` properties. Removing units from zeroes means accidentally fixing bad CSS that has units where they shouldn't be. Once you work in shorthand values, the list of places not to remove units from gets long and complicated.
