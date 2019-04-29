@@ -1,0 +1,5 @@
+.foo {
+	@media screen and (max-width: 300) {
+	}
+	z-index: 0;
+}

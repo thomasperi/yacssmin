@@ -7,116 +7,64 @@ class MinifierTest extends \PHPUnit\Framework\TestCase {
 		return \ThomasPeri\YaCSSMin\Minifier::minify($css);
 	}
 	
-	function test_a() {
-		$this->assertEquals(
-			'.hello{z-index:0}',
-			$this->minify("/* hello */\n\n.hello {\n\tz-index: 0;\n}\n\n")
-		);
-	}
-	
-	function test_minify() {
-		$this->assertEquals(
-			'.hello{font-size:20px}',
-			$this->minify("/* hello */\n\n.hello {\n\tfont-size: 20px;\n}\n\n")
-		);
-	}
+	function test_() {
+		$errors = [];
+		$dir = __DIR__ . '/test-data/';
+		foreach (scandir($dir) as $subdir) {
+			if ('.' === substr($subdir, 0, 1)) {
+				continue;
+			}
+			$subdir = $subdir . '/';
+			$subdir_full = $dir . $subdir;
 
-	function test_minify_empty_block() {
-		$this->assertEquals(
-			'',
-			$this->minify("/* hello */\n\n.hello {}\n\n")
-		);
-	}
-
-	function test_minify_empty_block_comment() {
-		$this->assertEquals(
-			'',
-			$this->minify("/* hello */\n\n.hello {/* nothing here */}\n\n")
-		);
-	}
-
-	function test_minify_empty_block_whitespace() {
-		$this->assertEquals(
-			'',
-			$this->minify("/* hello */\n\n.hello {   }\n\n")
-		);
-	}
-
-	function test_minify_empty_block_whitespace_comment() {
-		$this->assertEquals(
-			'',
-			$this->minify("/* hello */\n\n.hello { /* nothing here */}\n\n")
-		);
-	}
-
-	function test_minify_empty_block_comment_whitespace_comment() {
-		$this->assertEquals(
-			'',
-			$this->minify("/* hello */\n\n.hello {/* nothing here */ }\n\n")
-		);
-	}
-
-	function test_minify_empty_block_after_brace() {
-		$this->assertEquals(
-			'.a{text-align:center}.c{line-height:100%}',
-			$this->minify(".a { text-align  :    center; } .b { } .c {line-height: 100%}")
-		);
-	}
-
-	function test_minify_url() {
-		$this->assertEquals(
-			'.a{background-image:url(/one/two/three.png)}',
-			$this->minify(".a { background-image  :url(/one/two/three.png); }")
-		);
-	}
-
-	function test_minify_url_quotes() {
-		$this->assertEquals(
-			".a{background-image:url('/one/two/three.png')}",
-			$this->minify(".a { background-image: url('/one/two/three.png'); }")
-		);
-		$this->assertEquals(
-			'.a{background-image:url("/one/two/three.png")}',
-			$this->minify('.a { background-image: url("/one/two/three.png"); }')
-		);
-	}
-	
-	function test_colons_in_selector() {
-		$this->assertEquals(
-			".a :first-child{z-index:1}",
-			$this->minify(".a :first-child { z-index: 1; }")
-		);
-
-		// Don't accidentally fix broken CSS
-		$this->assertEquals(
-			".a : first-child{z-index:1}",
-			$this->minify(".a : first-child { z-index: 1; }")
-		);
-		$this->assertEquals(
-			".a: first-child{z-index:1}",
-			$this->minify(".a: first-child { z-index: 1; }")
-		);
-	}
-
-	function test_colons_in_media_expression() {
-		$expected = "@media only screen and (max-width:600px){.p :first-child{z-index:0}}";
+			if (is_dir($subdir_full)) {
+				$tests = scandir($subdir_full);
+				$index = array_search('_expected.css', $tests);
+				if ($index !== false) {
+					unset($tests[$index]);
+					$expected = file_get_contents($subdir_full . '_expected.css');
+					foreach ($tests as $source) {
+						if (
+							'.' === substr($source, 0, 1) ||
+							'.css' !== substr($source, -4)
+						) {
+							continue;
+						}
+						$actual = $this->minify(file_get_contents($subdir_full . $source));
+						if ($expected === $actual) {
+							echo '+';
+						} else {
+							echo '-';
+							$errors[] = [
+								'file' => $subdir . $source,
+								'expected' => $expected,
+								'actual' => $actual,
+							];
+						}
+						ob_flush();
+					}
+				}
+			}
+		}
+		echo "\n";
+		ob_flush();
 		
-		$this->assertEquals($expected, $this->minify(
-			"@media only screen and (max-width: 600px) { .p :first-child { z-index: 0; } }"
-		));
-		$this->assertEquals($expected, $this->minify(
-			"@media only screen and ( max-width : 600px ) { .p :first-child { z-index : 0; } }  "
-		));
-	}
+		if ($errors) {
+			$msg = ["Failures in test_():\n"];
+			$i = 0;
+			foreach ($errors as $error) {
+				$msg[] = '(' . ++$i . ') ' .  $error['file'];
+				$msg[] = "----- Expected: -----";
+				$msg[] = $error['expected'];
+				$msg[] = "----- Actual: -------";
+				$msg[] = $error['actual'];
+				$msg[] = "\n";
+			}
+			$this->assertTrue(false, implode("\n", $msg));
 
-	function test_nested_empties() {
-		$expected = "p{z-index:0}";
-		$this->assertEquals($expected, $this->minify(
-			"p {z-index : 0} .a :first-child { @media (max-width: 600px) { /* foo */ } }"
-		));
-		$this->assertEquals($expected, $this->minify(
-			".a :first-child { @media (max-width: 600px) { /* foo */ } } p {z-index : 0} "
-		));
+		} else {
+			$this->assertTrue(true); // Make the test un-risky.
+		}
 	}
 }
 

@@ -1,0 +1,6 @@
+.foo :hover {
+	z-index: 0;
+}
+.bar:hover {
+	z-index: 1;
+}
