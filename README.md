@@ -5,6 +5,8 @@ Yet Another CSS Minifier
 
     $minified_css = \ThomasPeri\YaCSSMin\Minifier::minify($css);
 
+That's it. The rest of this readme is philosophical.
+
 ## Why?
 Why write another CSS Minifier? Looking through the known issues with other minifiers, I had a few goals in mind:
 
