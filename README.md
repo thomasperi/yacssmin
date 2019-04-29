@@ -1,6 +1,10 @@
 # YaCSSMin
 Yet Another CSS Minifier
 
+## Warning
+
+I haven't created many test cases yet. Use at your own risk, and please report any issues you have with it.
+
 ## Usage
 
     $minified_css = \ThomasPeri\YaCSSMin\Minifier::minify($css);
