@@ -1,0 +1,6 @@
+/* collapse semicolons with spaces between */
+.foo {
+	z-index: 0 ;
+	; ;
+	top: 10px;
+}

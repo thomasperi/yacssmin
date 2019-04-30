@@ -9,6 +9,10 @@ class MinifierTest extends \PHPUnit\Framework\TestCase {
 	
 	function test_() {
 		$errors = [];
+		$success = 0;
+		$failure = 0;
+		$total = 0;
+		$wrap = 72;
 		$dir = __DIR__ . '/test-data/';
 		foreach (scandir($dir) as $subdir) {
 			if ('.' === substr($subdir, 0, 1)) {
@@ -32,21 +36,28 @@ class MinifierTest extends \PHPUnit\Framework\TestCase {
 						}
 						$actual = $this->minify(file_get_contents($subdir_full . $source));
 						if ($expected === $actual) {
-							echo '+';
-						} else {
 							echo '-';
+							$total++;
+							$success++;
+						} else {
+							echo 'X';
 							$errors[] = [
 								'file' => $subdir . $source,
 								'expected' => $expected,
 								'actual' => $actual,
 							];
+							$total++;
+							$failure++;
+						}
+						if ($total % $wrap === 0) {
+							echo "\n";
 						}
 						ob_flush();
 					}
 				}
 			}
 		}
-		echo "\n";
+		echo "\ntest_() tested $total stylesheets. $success succeeded. $failure failed.\n";
 		ob_flush();
 		
 		if ($errors) {

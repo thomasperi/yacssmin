@@ -40,9 +40,12 @@ class Minifier {
 	
 			// Words including hyphens stay as they are.
 			'#[\w-]+#' => true,
+			
+			// Multiple semicolons collapse to a single semicolon.
+			'#(;\s*)+#s' => ';',
 
-			// Isolate a few individual characters.
-			'#[@:;(){}]#' => true,
+			// Isolate a few other characters individually.
+			'#[@:(){}]#' => true,
 		];
 	
 	private function tokenize($css) {
