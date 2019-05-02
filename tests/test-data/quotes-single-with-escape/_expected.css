@@ -1,0 +1,1 @@
+p::before{content:' \' /* escaped quote */  div    p { color: red; }   \' '}
