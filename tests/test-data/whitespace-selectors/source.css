@@ -4,3 +4,6 @@
 .bar:hover {
 	z-index: 1;
 }
+.zote: hover {
+	z-index: 2;
+}
