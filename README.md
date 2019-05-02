@@ -5,6 +5,18 @@ Yet Another CSS Minifier
 
 I haven't created many test cases yet. Use at your own risk, and please report any issues you have with it.
 
+## Installation
+
+**Composer**  
+In your project directory:
+
+    composer require thomasperi/yacssmin
+    
+**Manually**  
+Download [Minifier.php](https://raw.githubusercontent.com/thomasperi/yacssmin/master/src/Minifier.php) and `require` it in your PHP app:
+
+	require '/path/to/Minifier.php';
+
 ## Usage
 
     $minified_css = \ThomasPeri\YaCSSMin\Minifier::minify($css);
@@ -12,7 +24,7 @@ I haven't created many test cases yet. Use at your own risk, and please report a
 That's it. The rest of this readme is philosophical.
 
 ## Why?
-Why write another CSS Minifier? Looking through the known issues with other minifiers, I had a few goals in mind:
+Why write another CSS Minifier? I had a few goals in mind:
 
 * No dependencies on other libraries.
 * Readable and maintainable, using regular expressions only for tokenizing, not for decision-making.
@@ -21,80 +33,107 @@ Why write another CSS Minifier? Looking through the known issues with other mini
 * Handle corner cases in the simplest way possible, even if it means the output is a few bytes longer than it could be.
 
 ## The Two Big Challenges
-CSS comments and white space are complicated. Half the source code of this minifier deals with how and when to convert them.
+In CSS, white space and comments are complicated. Half the source code of this minifier deals with how and when to convert them.
 
-### #1: Comments
+### #1: Whitespace
 
-Comments in CSS are "ignored," sure. But exactly what that means depends on the context. In some parts of a stylesheet they're equivalent to nothing-at-all. These two selectors are equivalent:
+In some contexts whitespace is ignored, and in others it has meaning. Here's an example in which all of the whitespace is completely meaningless and can be stripped away:
 
-    div.bar
-    div/* foo */.bar
-    
-In other contexts, a comment is equivalent to whitespace. These two media queries are equivalent:
-
-    @media screen and (min-width: 500px)
-    @media screen/* foo */and (min-width: 500px)
-
-How do we go about writing rules to match the behavior?
-
-Fortunately, the vast majority of comments you'll actually write aren't going to be inside selectors or media queries, so the minifier doesn't need to optimize for those. It just needs to make sure they keep working the way they do.
-
-Furthermore, when a comment is where you'd normally put one -- before a selector, or before a declaration -- its context is easy to test for: It will be adjacent to a space (the beginning or end of the file counts as a space) and/or any of these characters:
-
-    ,;{}
-
-So that's all YaCSSMin tests for. Comments that meet those criteria get stripped. Comments in other contexts get replaced with *empty* comments, so that as far as a web browser is concerned, it's still a comment. The minifier doesn't have to worry about whether to remove it or replace it with whitespace.
-
-    div/* foo */.bar
-    --- becomes ---
-    div/**/.bar
-
-    @media screen/* foo */and (min-width: 500px)
-    --- becomes ---
-    @media screen/**/and (min-width:500px)
-
-### #2: Whitespace
-
-Whitespace in CSS suffers a similar ambiguity. In some contexts it really is ignored, and in others it has meaning. Where should the minifier strip whitespace and where should it not?
-
-An example in which all of the whitespace can be stripped:
-
-    .foo {
+    div {
         color: red;
     }
     
-The above has the exact same meaning as the below:
+Without any of the whitespace it means exactly the same thing:
     
-    .foo{color:red;}
+    div{color:red;}
 
-It *does* matter in selectors, like these three lines:
+But of course that's not the case with all whitespace. These three selectors differ only in whitespace, but select different elements.
 
-    div :hover
-    div:hover
-    div: hover
+    div .foo    /* An element of class "foo", inside a div */
+    div.foo     /* A div of class "foo" */
+    div. foo    /* Malformed; doesn't select anything */
     
-The first two are both valid, but the difference in whitespace is important. Changing the whitespace changes the behavior. The third is a typo and doesn't do anything, but removing the whitespace would accidentally make it do something.
+It's easy to see why the space in the first example shouldn't be stripped. But even the malformed selector should be left how it is, so that the minified stylesheet continues to behave exactly as it did before it was minified. Inadvertently fixing malformed code would allow problems to go unnoticed.
 
-Whitespace also matters around `calc()` operators like `+` and `-`:
+There are other contexts where whitespace matters. For example:
 
-    calc(500px - (300px + 100px)) /* this works as expected */
-    calc(500px - (300px +100px))  /* this doesn't           */
-    calc(500px - (300px+100px))   /* neither does this      */
+    calc( 100rem - 10px ) /* This works. */
+    calc(100rem - 10px)   /* This works. */
+    calc(100rem-10px)     /* This doesn't work. */
+    calc (100rem - 10px)  /* This doesn't work. */
 
-Another example, with a media query:
+    @media screen and (max-width: 300px)  /* This works. */
+    @media screen and ( max-width:300px ) /* This works. */
+    @media screen and(max-width: 300px)   /* This doesn't work. */
 
-    @media screen and (min-width: 1000px)  /* works        */
-    @media screen and ( min-width:1000px ) /* works        */
-    @media screen and( min-width:1000px )  /* doesn't work */
-    @media screen and(min-width: 1000px)   /* doesn't work */
+Therefore, YaCSSMin only strips whitespace that:
+
+* adjoins any of these characters: `,;{}`,
+* adjoins a colon in name:value pairs (but not in selectors),
+* follows an opening parenthesis,
+* precedes a closing parenthesis, or
+* adjoins the beginning or end of the file.
+
+Everywhere else, whitespace is meaningful, and so YaCSSMin only replaces each contiguous run of whitespace with a single space character.
+
+### #2: Comments
+
+Here's what the [W3C Recommendation](https://www.w3.org/TR/CSS21/syndata.html#comments) says about CSS comments:
+
+> Comments begin with the characters "/\*" and end with the characters "\*/". They may occur anywhere outside other tokens, and their contents have no influence on the rendering. Comments may not be nested.
+
+Sounds simple enough, right? But the reality is more complicated. Comments in CSS suffer from a similar ambiguity as whitespace. The precise way in which they "have no influence" depends on the context.
+
+Fortunately the vast majority of comments in real-world stylesheets are adjacent to whitespace (tabs and linebreaks), like this:
+
+    /* 
+     * This comment has the beginning of the file before it
+     * and a linebreak after it.
+     */
+    div {
+        /* This comment has a tab before it and a linebreak after it */
+        color: red;
+        
+        position: relative;
+    }
     
-So here's where YaCSSMin strips whitespace:
+Even most weirdly-placed comments are usually at least adjacent to the whitespace-safe characters `,;{}` and can safely be stripped:
+    
+    a {color: green/* This comment has a brace after it. */}
 
-* When it abuts another space, the beginning or end of file, or any of the four characters listed above for comments.
-* When it abuts a colon in a name:value pair. (But not in selectors, where space around colons is meaningful.)
-* After an opening parenthesis or before a closing one.
+But what do we do with corner cases where the behavior of comments is unpredictable? Here are three contrasting examples:
 
-Everywhere else -- places where the whitespace might be meaningful -- it just converts contiguous runs of whitespace into single spaces.
+**1.** Comments in calc() expressions seem to be **equivalent to nothing**. Replacing the comment with a space accidentally fixes broken CSS code:
+
+    calc(100rem/* foo */- 10px)  /* Broken */
+    calc(100rem - 10px)          /* Accidental Fix */
+
+**2.** Comments between words in @-rules seem to be **equivalent to spaces**. Replacing the comment with nothing breaks working code:
+
+    @media screen/* foo */and (max-width: 300px)  /* This works. */
+    @media screenand (max-width: 300px)           /* This breaks it. */
+
+**3.** Comments between words inside a selector are even more nefarious. They **don't act as spaces**, but they **still separate tokens** the way spaces would:
+
+	section/* foo */div     /* Comment:  Broken         */
+	section div             /* Space:    Accidental Fix */
+	sectiondiv              /* No-space: Stays broken   */
+	
+	sect/* foo */ion div    /* Comment:  Broken         */
+	sect ion div            /* Space:    Stays broken   */
+	section p               /* No-space: Accidental Fix */
+
+That means that in order to know whether to strip the comment or replace it with a space inside selectors, we would need to compare the words adjoining a comment with all known HTML tags.
+
+But no. YaCSSMin instead "chooses not to decide" (*a la* Rush) and leaves those comments in place. It just empties them first.
+
+	section/* foo */div     /* Comment:  Broken         */
+	section/**/div          /* Empty:    Stays broken   */
+
+	sect/* foo */ion div    /* Comment:  Broken         */
+	sect/**/ion div         /* Empty:    Stays broken   */
+
+Simple, effective, and since no human being would ever actually write CSS like this, we don't need to worry about the three or four extra bytes we could have saved by deciding whether to replace it with a space or to strip it.
 
 ## Other Features (and Non-Features)
 
@@ -106,6 +145,7 @@ Here's some other stuff it removes:
 Stuff it *doesn't* do yet:
 
 * Shorten color names and hex codes
+* 
 
 And stuff it will probably never do:
 
