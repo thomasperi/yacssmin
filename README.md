@@ -3,7 +3,7 @@ Yet Another CSS Minifier
 
 ## Warning
 
-I haven't created many test cases yet. Use at your own risk, and please report any issues you have with it.
+I haven't created many test cases yet. Use at your own risk, and please submit any test cases you write, working or not.
 
 ## Installation
 
@@ -21,21 +21,32 @@ Download [Minifier.php](https://raw.githubusercontent.com/thomasperi/yacssmin/ma
 
     $minified_css = \ThomasPeri\YaCSSMin\Minifier::minify($css);
 
-That's it. The rest of this readme is philosophical.
+## Testing
 
-## Why?
+The best way to contribute is by submitting test cases -- both passing and failing. To create a new test case:
+
+1. Create a new subdirectory inside `tests/test-data`.
+2. Inside that subdirectory, create a file named `_expected.css`.
+3. Create as many other `.css` files inside that directory as you want.
+4. The test will fail if any of those other `.css` files, after being minified, don't match `_expected.css`.
+
+## Philosophy
+You can stop reading now unless you want to know about the ideas that went into YaCSSMin.
+
+### Why?
 Why write another CSS Minifier? I had a few goals in mind:
 
 * No dependencies on other libraries.
+* No "bells and whistles" -- just minify CSS.
 * Readable and maintainable, using regular expressions only for tokenizing, not for decision-making.
 * Don't break any CSS that works, even if there's crazy stuff in there.
 * Don't "accidentally fix" any broken CSS.
-* Handle corner cases in the simplest way possible, even if it means the output is a few bytes longer than it could be.
+* Handle corner cases in the simplest way possible.
 
-## The Two Big Challenges
-In CSS, white space and comments are complicated. Half the source code of this minifier deals with how and when to convert them.
+### The Two Big Challenges
+In CSS, white space and comments are complicated.
 
-### #1: Whitespace
+#### #1: Whitespace
 
 In some contexts whitespace is ignored, and in others it has meaning. Here's an example in which all of the whitespace is completely meaningless and can be stripped away:
 
@@ -76,7 +87,7 @@ Therefore, YaCSSMin only strips whitespace that:
 
 Everywhere else, whitespace is meaningful, and so YaCSSMin only replaces each contiguous run of whitespace with a single space character.
 
-### #2: Comments
+#### #2: Comments
 
 Here's what the [W3C Recommendation](https://www.w3.org/TR/CSS21/syndata.html#comments) says about CSS comments:
 
@@ -135,20 +146,24 @@ But no. YaCSSMin instead "chooses not to decide" (*a la* Rush) and leaves those 
 
 Simple, effective, and since no human being would ever actually write CSS like this, we don't need to worry about the three or four extra bytes we could have saved by deciding whether to replace it with a space or to strip it.
 
-## Other Features (and Non-Features)
+### Other Features (and Non-Features)
 
-Here's some other stuff it removes:
+Here's some other stuff YaCSSMin removes:
 
-* Empty blocks (and whatever rule the block applies to)
+* Empty blocks (and whatever rule or selector the block applies to)
 * Unnecessary semicolons
 
-Stuff it *doesn't* do yet:
+Things it *doesn't* do (yet?):
 
 * Shorten color names and hex codes
-* 
+* Keep some comments intact, like @license and @preserve
 
-And stuff it will probably never do:
+And stuff it will *probably never* do:
 
+* Bring images inline as data urls
+* Concatenate CSS files
 * Remove units from zeroes
 
-I'm reluctant to remove units from zeroes. Even though there is a finite number of places where units are necessary on zeroes (`calc()` expressions), there are also many places where units should never be used, such as `z-index`, `opacity`, and a lot of `flex` properties. Removing units from zeroes means accidentally fixing bad CSS that has units where they shouldn't be. Once you work in shorthand values, the list of places not to remove units from gets long and complicated.
+Inlining images and concatenating stylesheets can be done separately using whatever mechanism you like. These are separate tasks from minifying, so there's no reason for YaCSSMin to do them.
+
+The reason YaCSSMin will never remove units from zeroes is that there's a high risk of accidentally fixing bad CSS that has units where they shouldn't be. Even though there is a finite number of places where units are *necessary* on zeroes (`calc()` expressions), there are also many places where units should *never* be used, such as `z-index`, `opacity`, and a lot of `flex` properties. Once you consider shorthand values, the logic for removing units only in the right contexts gets long and complicated.
