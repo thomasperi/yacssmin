@@ -128,7 +128,7 @@ class Minifier {
 
 				// If that something else is a closing brace,
 				// it's a nested block. process that one recursively
-				// before proceeding to the next, 'cause it might be
+				// before continuing with this one, 'cause it might be
 				// empty too.
 				case '}':
 					$this->blocks_tail($input, $output);
@@ -137,7 +137,20 @@ class Minifier {
 				// If that something else is an opening brace,
 				// this block is empty, so don't push any output.
 				case '{':
-					$this->blocks_empty($input, $output);
+					// Pop things off until we find a semicolon or an open or
+					// close brace. (Don't pop whatever is found.)
+					while ($input) {
+						switch (end($input)) {
+							case ';':
+							case '{':
+							case '}':
+								break 2;
+							default:
+								array_pop($input);
+						}
+					}
+					// And since the block was empty, we're done
+					// optimizing the tail end of it, so return.
 					return;
 
 				// If anything else is found, we're done optimizing the
@@ -147,22 +160,6 @@ class Minifier {
 					$output[] = '}';
 					$input[] = $token;
 					return;
-			}
-		}
-	}
-	
-	// Removes whatever comes before an empty set of braces.
-	private function blocks_empty(&$input, &$output) {
-		// Pop things off until we find a semicolon or an open or
-		// close brace. (Don't pop whatever is found.)
-		while ($input) {
-			switch (end($input)) {
-				case ';':
-				case '{':
-				case '}':
-					return;
-				default:
-					array_pop($input);
 			}
 		}
 	}
