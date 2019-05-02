@@ -3,6 +3,8 @@ namespace ThomasPeri\YaCSSMin;
 
 /**
  * Yet Another CSS Minifier
+ * @author Thomas Peri <tjperi@gmail.com>
+ * @license MIT
  */
 class Minifier {
 	/**
@@ -202,6 +204,7 @@ class Minifier {
 				case '{';
 				case '}';
 					$in_at = false;
+					$in_expr = false;
 					// fall-through
 				
 				case ',';
@@ -210,40 +213,28 @@ class Minifier {
 					$this->strip($output);
 					break;
 
+				// Strip whitespace around colons that are part of
+				// media expressions or style declarations, but not
+				// selectors.
 				case ':':
-					// Strip whitespace around colons that are part of
-					// media expressions or style declarations, but not
-					// selectors.
-					
 					// Media expressions are taken care of already.
 					if ($in_expr) {
 						$strip = true;
-
-					// If we're in an @-rule but not in a media
-					// expression, finding a colon is weird, so don't
-					// strip anything.
+					
+					// If we're not in a media expression but we are in
+					// an @-rule, finding a colon is weird, so don't
+					// strip spaces.
 					} else if ($in_at) {
 						$strip = false;
 						
-					// To know whether we're inside a declaration or a
-					// selector, we need to look at the next character
-					// that might end either of those things.
+					// If we're not in a media expression or an @-rule,
+					// check if the next big thing is a block.
 					} else {
-						// An open brace would mean this is a selector.
-						$next_open = $this->nearest('{', $input);
-						
-						// A close brace or a semicolon means a delcaration.
-						$next_close = $this->nearest('}', $input);
-						$next_semi = $this->nearest(';', $input);
-					
-						// Strip whitespace if the next closing brace
-						// or semicolon comes before the next open
-						// brace. (Check for greater-than because the
-						// input array is reversed.)
-						$strip = (
-							($next_close > $next_open) ||
-							($next_semi > $next_open)
-						);
+						// If it's NOT a block, the colon is part of a 
+						// declaration, so we CAN strip whitespace.
+						// If it IS a block, the colon is part of a
+						// selector, so DON'T strip whitespace.
+						$strip = !$this->block_approaching($input);
 					}
 					
 					if ($strip) {
@@ -264,14 +255,15 @@ class Minifier {
 			array_pop($array);
 		}
 	}
-
-	// Find the next instance of a particular token in the remaining input.
-	private function nearest($token, &$input) {
+	
+	// If the next open brace comes before the next closing brace or
+	// semicolon, then the next thing after the thing we're in is a block.
+	private function block_approaching(&$input) {
+		$end = ['{', '}', ';'];
 		for ($i = count($input) - 1; $i >= 0; $i--) {
-			if ($input[$i] === $token) {
-				break;
+			if (in_array($input[$i], $end)) {
+				return $input[$i] === '{';
 			}
 		}
-		return $i;
 	}
 }
