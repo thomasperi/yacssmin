@@ -34,6 +34,9 @@ class MinifierTest extends \PHPUnit\Framework\TestCase {
 						) {
 							continue;
 						}
+
+// 						echo "\n\n=== file: $subdir$source ===\n\n";
+
 						$actual = $this->minify(file_get_contents($subdir_full . $source));
 						if ($expected === $actual) {
 							echo '-';

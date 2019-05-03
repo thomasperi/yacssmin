@@ -20,7 +20,7 @@ class Minifier {
 		$tokens = $min->tokenize(' ' . $css . ' '); 
 		$tokens = $min->blocks($tokens);
 		$tokens = $min->spaces($tokens);
-
+		
 		return trim(implode('', $tokens));
 	}
 	
@@ -40,9 +40,18 @@ class Minifier {
 
 		// Multiple semicolons collapse to a single semicolon.
 		'#(;\s*)+#s' => ';',
+		
+		// Operators in attribute selectors like [class^="foo""]
+		'#[~^|*$]?=#' => true,
+		
+		// Any word that precedes an open parentheses,
+		// optionally with a colon to match pseudo-classes.
+		'#:?[\w-]+(?=\()#' => true,
 
-		// Isolate a few other characters individually.
-		'#[@,:(){}]#' => true,
+		// Isolate a few other characters individually. Keep this one
+		// last so that it doesn't supercede other patterns that begin
+		// with these characters.
+		'#[~^|*$>+\-,:(){}[\]]#' => true,
 	];
 	
 	// Parse the CSS file into an array of tokens.
@@ -169,72 +178,129 @@ class Minifier {
 		$input = array_reverse($input);
 		$output = [];
 		
-		// In order to strip spaces around colons, we need to know
-		// whether it's part of a selector, a declaration, or a media
-		// expression. We can detect media expressions as we move
-		// forward, without looking ahead. We need to also detect
-		// @-rules, because that's where parentheses mean media
-		// expressions.
-		$in_at = false;
-		$in_expr = false;
+		// Keep track of some contexts we might be inside of.
+		$inside = [];
 		
 		while ($input) {
 			$token = array_pop($input);
+			
+			// First track what delimiters we're currently inside.
 			switch ($token) {
-				case '@':
-					$in_at = true;
-					break;
-				
 				case '(':
-					$this->strip($input);
-					if ($in_at) {
-						$in_expr = true;
+					$expr = strtolower(end($output));
+					if ($expr === 'calc') {
+						$inside[] = 'calc';
+					} else if (substr($expr, 0, 5) === ':nth-') {
+						$inside[] = 'nth';
+					} else {
+						$inside[] = '(';
 					}
 					break;
-				
-				case ')':
-					$this->strip($output);
-					$in_expr = false;
+				case '[':
+				case '{':
+					$inside[] = $token;
 					break;
 				
+				case '}':
+				case ']':
+				case ')':
+					array_pop($inside); // Don't bother matching the opener.
+			}
+			
+			// Then decide what to do around the current character.
+			switch ($token) {
+				// Strip whitespace to the right of these.
+				case '[':
+				case '(':
+					$this->strip($input);
+					break;
+				
+				// Strip whitespace to the left of these.
+				case ']':
+				case ')':
+					$this->strip($output);
+					break;
+				
+				// Strip whitespace around these
+				case ' ':
 				case ';';
 				case '{';
 				case '}';
-					$in_at = false;
-					$in_expr = false;
-					// fall-through
-				
 				case ',';
-				case ' ':
+				case '>':
+				case '~=':
+				case '^=':
+				case '|=':
+				case '*=':
+				case '$=':
 					$this->strip($input);
 					$this->strip($output);
 					break;
 
-				// Strip whitespace around colons that are part of
-				// media expressions or style declarations, but not
-				// selectors.
-				case ':':
-					// Media expressions are taken care of already.
-					if ($in_expr) {
-						$strip = true;
-					
-					// If we're not in a media expression but we are in
-					// an @-rule, finding a colon is weird, so don't
-					// strip spaces.
-					} else if ($in_at) {
-						$strip = false;
-						
-					// If we're not in a media expression or an @-rule,
-					// check if the next big thing is a block.
-					} else {
-						// If it's NOT a block, the colon is part of a 
-						// declaration, so we CAN strip whitespace.
-						// If it IS a block, the colon is part of a
-						// selector, so DON'T strip whitespace.
-						$strip = !$this->block_approaching($input);
+				// Don't fix malformed equality operators inside brackets.
+				case '~':
+					// Always strip spaces from the left of a tilde,
+					// but only strip them from the right if it's
+					// outside of brackets or the next closing bracket
+					// is closer than the next equals.
+					$this->strip($output);
+					if (
+						end($inside) !== '[' || 
+						$this->nearest($input, ']=') === ']'
+					) {
+						$this->strip($input);
 					}
-					
-					if ($strip) {
+					break;
+				case '^':
+				case '|':
+				case '*':
+				case '$':
+					if (end($inside) === '[') {
+						$this->strip($output);
+					}
+					break;
+				case '=':
+					// Always strip spaces from the right of an equals,
+					// but only strip them from the left if it's
+					// outside of brackets or the previous opening
+					// bracket is closer than the previous character
+					// that might be part of a malformed operator.
+					$this->strip($input);
+					if (
+						end($inside) !== '[' ||
+						$this->nearest($output, '[~^|*$') === '['
+					) {
+						$this->strip($output);
+					}
+					break;
+
+				// Strip whitespace around `+` tokens but only inside
+				// selectors.
+				case '+':
+					if ($this->nearest($input, '{};') === '{') {
+						$this->strip($input);
+						$this->strip($output);
+					}
+					break;
+				
+				// Strip whitespace around `-` tokens only inside
+				// :nth-X() pseudo-classes
+				case '-':
+					if (end($inside) === 'nth') {
+						$this->strip($input);
+						$this->strip($output);
+					}
+					break;
+				
+				// Strip whitespace around colons if inside parentheses
+				// (i.e. a media expression) or if we're not inside 
+				// a selector, which we test for by checking whether a 
+				// block is coming soon.
+				case ':':
+					if (
+						end($inside) === '(' ||
+						$this->nearest($input, '{};') !== '{'
+					) {
 						$this->strip($input);
 						$this->strip($output);
 					}
@@ -253,14 +319,14 @@ class Minifier {
 		}
 	}
 	
-	// If the next open brace comes before the next closing brace or
-	// semicolon, then the next thing after the thing we're in is a block.
-	private function block_approaching(&$input) {
-		$end = ['{', '}', ';'];
+	//
+	private function nearest(&$input, $haystack) {
+		$haystack = str_split($haystack);
 		for ($i = count($input) - 1; $i >= 0; $i--) {
-			if (in_array($input[$i], $end)) {
-				return $input[$i] === '{';
+			if (in_array($input[$i], $haystack)) {
+				return $input[$i];
 			}
 		}
+		return false;
 	}
 }

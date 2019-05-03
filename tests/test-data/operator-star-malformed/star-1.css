@@ -1,0 +1,3 @@
+div[class *= "foo"] {
+	left: calc((3 * 20px) * 100%);
+}
