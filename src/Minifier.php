@@ -188,8 +188,12 @@ class Minifier {
 			switch ($token) {
 				case '(':
 					$expr = strtolower(end($output));
-					if ($expr === 'calc') {
-						$inside[] = 'calc';
+					// We never go looking for end($inside) to be
+					// `matches` specifically, but we need it to be
+					// something other than `nth` or `(` which we do
+					// compare for.
+					if ($expr === ':matches') {
+						$inside[] = 'matches';
 					} else if (substr($expr, 0, 5) === ':nth-') {
 						$inside[] = 'nth';
 					} else {
@@ -293,9 +297,11 @@ class Minifier {
 					break;
 				
 				// Strip whitespace around colons if inside parentheses
-				// (i.e. a media expression) or if we're not inside 
-				// a selector, which we test for by checking whether a 
-				// block is coming soon.
+				// -- i.e. a media expression, not including :matches
+				// which gets registered as 'matches' instead of `(` --
+				// or if we're not inside a selector, which we test for
+				// by checking whether an open brace is coming sooner
+				// than a closing brace or semicolon.
 				case ':':
 					if (
 						end($inside) === '(' ||
@@ -319,12 +325,16 @@ class Minifier {
 		}
 	}
 	
-	//
-	private function nearest(&$input, $haystack) {
-		$haystack = str_split($haystack);
-		for ($i = count($input) - 1; $i >= 0; $i--) {
-			if (in_array($input[$i], $haystack)) {
-				return $input[$i];
+	// The character from $needles that appears closest to the end of $haystack.
+	private function nearest(&$haystack, $needles) {
+		$needles = str_split($needles);
+		for ($i = count($haystack) - 1; $i >= 0; $i--) {
+			// This looks backwards because in_array's arguments are
+			// ($needle, $haystack), but we're looking for a specific
+			// *member* of $haystack in the *array* of $needles to find
+			// which of those needles appears first in $haystack.
+			if (in_array($haystack[$i], $needles)) {
+				return $haystack[$i];
 			}
 		}
 		return false;
