@@ -5,6 +5,8 @@ Yet Another CSS Minifier
 
 I haven't created many test cases yet. Use at your own risk, and please submit any test cases you write, working or not.
 
+Also it's pitifully slow. Too much array access I'm guessing is the culprit.
+
 ## Installation
 
 **Composer**  
