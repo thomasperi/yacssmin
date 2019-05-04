@@ -40,9 +40,9 @@ class Minifier {
 			switch ($token) {
 				// Follow comments to the next `*/`
 				case '/':
-					if ($i < $count - 1 && '*' === $split[$i + 1]) {
+					if ($i + 1 < $count && '*' === $split[$i + 1]) {
 						$i++;
-						while ($i < $count - 2 && (
+						while ($i + 2 < $count && (
 							'*' !== $split[++$i] ||
 							'/' !== $split[++$i]
 						));
@@ -56,7 +56,7 @@ class Minifier {
 				case "'":
 					$start = $i;
 					$quote = $token;
-					while ($i < $count - 1) {
+					while ($i + 1 < $count) {
 						$i++;
 						$tok = $split[$i];
 						switch ($tok) {
@@ -73,7 +73,7 @@ class Minifier {
 				// Replace runs of multiple semicolons and whitespace
 				// with a single semicolon.
 				case ';':
-					while ($i < $count - 1 && (
+					while ($i + 1 < $count && (
 						'' === trim($split[$i + 1]) ||
 						';' === $split[$i + 1]
 					)) {
@@ -85,12 +85,12 @@ class Minifier {
 				// if the word is followed immediately by an open parenthesis.
 				case ':':
 					$start = $i;
-					while ($i < $count - 1 &&
+					while ($i + 1 < $count &&
 						preg_match($dashed_word, $split[$i + 1])
 					) {
 						$i++;
 					}
-					if ($i < $count - 1 && '(' === $split[$i + 1]) {
+					if ($i + 1 < $count && '(' === $split[$i + 1]) {
 						$token = implode('', array_slice($split, $start, $i + 1 - $start));
 					} else {
 						$i = $start;
@@ -101,7 +101,7 @@ class Minifier {
 				default:
 					if ('' === trim($token)) {
 						$token = ' ';
-						while ($i < $count && '' === trim($split[$i + 1])) {
+						while ($i + 1 < $count && '' === trim($split[$i + 1])) {
 							$i++;
 						}
 					}
