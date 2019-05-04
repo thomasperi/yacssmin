@@ -23,84 +23,93 @@ class Minifier {
 		
 		return trim(implode('', $tokens));
 	}
-	
-	private static $partials = [
-		// Contiguous whitespace becomes a single space.
-		'\s+',
-	
-		// The rules for whether a comment is considered nothing or
-		// whitespace are complicated, so for the first pass, just
-		// convert all comments to empty comments.
-		'(/\*.*?\*/)+',
-		
-		// Quoted strings stay as they are.
-		'\'(\\\\?.)*?\'',
-		'\"(\\\\?.)*?\"',
 
-		// Multiple semicolons collapse to a single semicolon.
-		'(;\s*)+',
-		
-		// Operators in attribute selectors like [class^="foo""]
-		'[~^|*$]?=',
-		
-		// Any word that precedes an open parentheses,
-		// optionally with a colon to match pseudo-classes.
-		':?[\w-]+(?=\()',
-
-		// Isolate a few other characters individually. Keep this one
-		// last so that it doesn't supercede other patterns that begin
-		// with these characters.
-		'[~^|*$>+\-,:(){}[\]]',
-	];
-	
 	// Parse the CSS file into an array of tokens.
 	private function tokenize($css) {
-		$all = '#(' . implode(')|(', self::$partials) . ')#s';
-		
+		$boundaries = "#(?<=\W)|(?=\W)#s";
+		$split = preg_split($boundaries, $css);
 		$tokens = [];
-		$len = strlen($css);
-		$offset = 0;
-		$start = 0;
+		$count = count($split);
 
-		do {
-			$found = preg_match($all, $css, $matches, PREG_OFFSET_CAPTURE, $offset);
-			if ($found) {
-				$match = $matches[0][0];
-				$start = $matches[0][1];
-			} else {
-				$start = $len;
-			}
-			
-			// Add unmatched stuff.
-			if ($start > $offset) {
-				$tokens[] = substr($css, $offset, $start - $offset);
-			}
-			
-			// Add matched stuff.
-			if ($found) {
-				$char = substr($match, 0, 1);
-				$token = $match;
-				switch ($char) {
-					case ';':
-						$token = ';';
-						break;
-					case '/':
-						if (substr($match, 1, 1) === '*') {
-							$token = '/**/';
+// 		var_dump($split);
+
+		for ($i = 0; $i < $count; $i++) {
+			$token = $split[$i];
+// 			echo "\n--- looking at index $i: `$token`";
+			switch ($token) {
+				// Follow comments to the next `*/`
+				case '/':
+					if ($i < $count - 1 && '*' === $split[$i + 1]) {
+						$i++;
+						while ($i < $count - 2 && (
+							'*' !== $split[++$i] ||
+							'/' !== $split[++$i]
+						));
+						$token = '/**/';
+					}
+					break;
+				
+				// Follow strings to the next matching quote,
+				// ignoring the character after each backslash.
+				case '"':
+				case "'":
+					$start = $i;
+					$quote = $token;
+					while ($i < $count - 1) {
+						$i++;
+						$tok = $split[$i];
+						switch ($tok) {
+							case '\\':
+								$i++;
+								break;
+							case $quote:
+								break 2;
 						}
-						break;
-					default:
-						if (preg_match('#\s#', $char)) {
-							$token = ' ';
+					}
+					$token = implode('', array_slice($split, $start, $i + 1 - $start));
+					break;
+				
+				// Replace runs of multiple semicolons and whitespace
+				// with a single semicolon.
+				case ';':
+					while ($i < $count - 1 && (
+						'' === trim($split[$i + 1]) ||
+						';' === $split[$i + 1]
+					)) {
+						$i++;
+					}
+					break;
+				
+				// Combine a colon with a word immediately following it
+				// if the word is followed immediately by an open parenthesis.
+				case ':':
+					$start = $i;
+					while ($i < $count - 1 &&
+						preg_match('#^[\w-]#', $split[$i + 1])
+					) {
+						$i++;
+					}
+					if ($i < $count - 1 && '(' === $split[$i + 1]) {
+						$token = implode('', array_slice($split, $start, $i + 1 - $start));
+					} else {
+						$i = $start;
+					}
+					break;
+				
+				// Replace runs of whitespace with a single space.
+				default:
+					if ('' === trim($token)) {
+						$token = ' ';
+						while ($i < $count && '' === trim($split[$i + 1])) {
+							$i++;
 						}
-				}
-				$tokens[] = $token;
+					}
 			}
-			
-			// Move the offset to the end of the match.
-			$offset = $start + strlen($match);
-			
-		} while ($found);
+			$tokens[] = $token;
+		}
+// 		
+// 		echo "\n$css\n";
+// 		var_dump($tokens);
 		
 		return $tokens;
 	}

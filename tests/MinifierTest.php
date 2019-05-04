@@ -35,9 +35,19 @@ class MinifierTest extends \PHPUnit\Framework\TestCase {
 							continue;
 						}
 
-// 						echo "\n\n=== file: $subdir$source ===\n\n";
+// 						echo "\n=== file: $subdir$source: ";
+// 						ob_flush();
 
-						$actual = $this->minify(file_get_contents($subdir_full . $source));
+						$original = file_get_contents($subdir_full . $source);
+						
+// 						$start = microtime(true);
+
+						$actual = $this->minify($original);
+
+// 						$duration = microtime(true) - $start;
+// 						echo "$duration seconds ===";
+// 						ob_flush();
+						
 						if ($expected === $actual) {
 							echo '-';
 							$total++;
@@ -48,6 +58,7 @@ class MinifierTest extends \PHPUnit\Framework\TestCase {
 								'file' => $subdir . $source,
 								'expected' => $expected,
 								'actual' => $actual,
+								'original' => $original,
 							];
 							$total++;
 							$failure++;
@@ -72,6 +83,8 @@ class MinifierTest extends \PHPUnit\Framework\TestCase {
 				$msg[] = $error['expected'];
 				$msg[] = "----- Actual: -------";
 				$msg[] = $error['actual'];
+				$msg[] = "----- Original: -------";
+				$msg[] = $error['original'];
 				$msg[] = "\n";
 			}
 			$this->assertTrue(false, implode("\n", $msg));
