@@ -26,16 +26,17 @@ class Minifier {
 
 	// Parse the CSS file into an array of tokens.
 	private function tokenize($css) {
+		// Split the CSS file along word boundaries.
 		$boundaries = "#(?<=\W)|(?=\W)#s";
+		$dashed_word = '#^[\w-]#';
 		$split = preg_split($boundaries, $css);
+		
+		// Now it's split up into words and not-words,
+		// but some of those tokens need to be re-combined.
 		$tokens = [];
 		$count = count($split);
-
-// 		var_dump($split);
-
 		for ($i = 0; $i < $count; $i++) {
 			$token = $split[$i];
-// 			echo "\n--- looking at index $i: `$token`";
 			switch ($token) {
 				// Follow comments to the next `*/`
 				case '/':
@@ -85,7 +86,7 @@ class Minifier {
 				case ':':
 					$start = $i;
 					while ($i < $count - 1 &&
-						preg_match('#^[\w-]#', $split[$i + 1])
+						preg_match($dashed_word, $split[$i + 1])
 					) {
 						$i++;
 					}
@@ -105,11 +106,11 @@ class Minifier {
 						}
 					}
 			}
+			
+			// Whatever $token has been possibly overwritten with,
+			// add it to the array of tokens.
 			$tokens[] = $token;
 		}
-// 		
-// 		echo "\n$css\n";
-// 		var_dump($tokens);
 		
 		return $tokens;
 	}
