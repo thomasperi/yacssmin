@@ -1,12 +1,6 @@
 # YaCSSMin
 Yet Another CSS Minifier
 
-## Warning
-
-I haven't created many test cases yet. Use at your own risk, and please submit any test cases you write, working or not.
-
-Also it's pitifully slow. Too much array access I'm guessing is the culprit.
-
 ## Installation
 
 **Composer**  
@@ -40,7 +34,7 @@ Why write another CSS Minifier? I had a few goals in mind:
 
 * No dependencies on other libraries.
 * No "bells and whistles" -- just minify CSS.
-* Readable and maintainable, using regular expressions only for tokenizing, not for decision-making.
+* Readable and maintainable, using regular expressions only for tokenizing, not for decision-making. (And it seems to be faster this way anyway.)
 * Don't break any CSS that works, even if there's crazy stuff in there.
 * Don't "accidentally fix" any broken CSS.
 * Handle corner cases in the simplest way possible.
