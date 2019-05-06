@@ -3,8 +3,8 @@ namespace ThomasPeri\YaCSSMin\Test;
 
 class MinifierTest extends \PHPUnit\Framework\TestCase {
 
-	function minify($css) {
-		return \ThomasPeri\YaCSSMin\Minifier::minify($css);
+	function minify(...$args) {
+		return call_user_func_array('\ThomasPeri\YaCSSMin\Minifier::minify', $args);
 	}
 	
 	function test_() {
@@ -24,6 +24,7 @@ class MinifierTest extends \PHPUnit\Framework\TestCase {
 			if (is_dir($subdir_full)) {
 				$tests = scandir($subdir_full);
 				$index = array_search('_expected.css', $tests);
+				
 				if ($index !== false) {
 					unset($tests[$index]);
 					$expected = file_get_contents($subdir_full . '_expected.css');
@@ -35,34 +36,41 @@ class MinifierTest extends \PHPUnit\Framework\TestCase {
 							continue;
 						}
 
-// 						echo "\n=== file: $subdir$source: ";
-// 						ob_flush();
-
 						$original = file_get_contents($subdir_full . $source);
-						
-// 						$start = microtime(true);
-
 						$actual = $this->minify($original);
-
-// 						$duration = microtime(true) - $start;
-// 						echo "$duration seconds ===";
-// 						ob_flush();
 						
-						if ($expected === $actual) {
-							echo '-';
-							$total++;
-							$success++;
-						} else {
+						// Sanity-check the minified against the tokens array.
+						$tokens = $this->minify($original, ['return_tokens' => true]);
+						$imploded = implode('', $tokens);
+						
+						$total++;
+						if ($expected !== $actual) {
 							echo 'X';
 							$errors[] = [
-								'file' => $subdir . $source,
-								'expected' => $expected,
-								'actual' => $actual,
-								'original' => $original,
+								'ERROR' => 'Minified string did not equal expected.',
+								'FILE' => $subdir . $source,
+								'EXPECTED' => $expected,
+								'ACTUAL' => $actual,
+								'ORIGINAL' => $original,
 							];
-							$total++;
 							$failure++;
+
+						} else if ($actual !== $imploded) {
+							echo 'X';
+							$errors[] = [
+								'ERROR' => 'Imploded tokens did not equal minified string.',
+								'FILE' => $subdir . $source,
+								'MINIFIED' => $actual,
+								'IMPLODED' => $imploded,
+								'ORIGINAL' => $original,
+							];
+							$failure++;
+							
+						} else {
+							echo '-';
+							$success++;
 						}
+						
 						if ($total % $wrap === 0) {
 							echo "\n";
 						}
@@ -78,14 +86,11 @@ class MinifierTest extends \PHPUnit\Framework\TestCase {
 			$msg = ["Failures in test_():\n"];
 			$i = 0;
 			foreach ($errors as $error) {
-				$msg[] = '(' . ++$i . ') ' .  $error['file'];
-				$msg[] = "----- Expected: -----";
-				$msg[] = $error['expected'];
-				$msg[] = "----- Actual: -------";
-				$msg[] = $error['actual'];
-				$msg[] = "----- Original: -------";
-				$msg[] = $error['original'];
-				$msg[] = "\n";
+				$msg[] = '(' . ++$i . ')';
+				foreach ($error as $key => $val) {
+				$msg[] = "----- $key: -----";
+				$msg[] = $val;
+				}
 			}
 			$this->assertTrue(false, implode("\n", $msg));
 

@@ -1,0 +1,5 @@
+@media screen and (max-width: calc(100px + 200px)) {
+	p {
+		color: red;
+	}
+}
