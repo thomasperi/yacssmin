@@ -1,0 +1,11 @@
+/**
+ * Not keeping this one...
+ */
+@media screen and (max-width: 500px) {
+	/**
+	 * This one neither.
+	 */
+	a {
+		color: red /* Here's a weird one. @keep */
+	}
+}

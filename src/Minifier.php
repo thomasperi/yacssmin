@@ -16,9 +16,13 @@ class Minifier {
 		$min = new self();
 		$min->options = $options;
 
-		$tokens = $min->tokenize($css); 
+		$tokens = $min->tokenize($css);
 		$tokens = $min->blocks($tokens);
 		$tokens = $min->spaces($tokens);
+		
+		if (is_callable($min->option('comment_filter'))) {
+			$min->comments($tokens);
+		}
 
 		// Return tokens if desired, but first do some extra processing.
 		if ($min->option('return_tokens')) {
@@ -31,7 +35,7 @@ class Minifier {
 	}
 	
 	// The instance's copy of the options array.
-	private $options;
+	private $options, $comments = [], $whitespace = [];
 	
 	// Retrieve an option.
 	private function option($key) {
@@ -45,61 +49,28 @@ class Minifier {
 		$boundaries = '#(?<=[^\w-])|(?=[^\w-])#s';
 		$input = array_reverse(preg_split($boundaries, $css));
 		
-		// Prep the comments filter.
-		$comments_filter = $this->option('comments_filter');
-		$comment_pattern = '#^/\*.*?\*/$#s';
-		if (!is_callable($comments_filter)) {
-			$comments_filter = false;
-		}
-
 		$output = [];
+		$whitespace = '';
 		while ($input) {
 			$token = array_pop($input);
 			switch ($token) {
 				// Reduce comments to a single token. Maybe empty, maybe not.
 				case '/':
 					if ('*' == end($input)) {
+						$token = '/**/';
 						array_pop($input);
+
+						// Build the comment by popping things off until the
+						// sequence `*/` has happened.
 						$comment = ['/*'];
 						while ($input && (
 							'*' !== ($comment[] = array_pop($input)) ||
 							'/' !== ($comment[] = array_pop($input))
 						));
-						
-						// If we're filtering comments, do so.
-						$result = null;
-						if ($comments_filter) {
-							$comment = implode('', $comment);
-							$result = $comments_filter($comment);
-						}
-						if ($result && preg_match($comment_pattern, $result)) {
-							// If the filter returned a valid comment,
-							// it'd be nice to put it all on lines by itself.
-							// Strip any whitespace that came before the
-							// original comment, and replace it with the
-							// $recent_whitespace stashed the last time
-							// whitespace was encountered.
-							$this->strip($output);
-							if ($output) {
-								// Keep the whitespace that comes after the
-								// last newline before the start of the comment.
-								$output[] = "\n" . preg_replace(
-									'#.*?([^\r\n]*)$#s',
-									"\\1",
-									implode('', $recent_whitespace)
-								);
-							}
-							// Also add a newline to the end of the comment
-							// and strip further whitespace from the input.
-							$token = $result . "\n";
-							while ('' === trim(end($input))) {
-								array_pop($input);
-							}
-						} else {
-							// Replace all other comments with empties.
-							$token = '/**/';
-						}
+						$this->comments[] = implode('', $comment);
+						$this->whitespace[] = $whitespace;
 					}
+					$whitespace = '';
 					break;
 				
 				// Combine a quoted string into a single token.
@@ -116,40 +87,55 @@ class Minifier {
 						}
 					}
 					$token = implode('', $quoted);
+					$whitespace = '';
 					break;
 				
-				// Reduce of multiple semicolons and whitespace
-				// to a single semicolon token.
-				case ';':
-					while ($input) {
-						$next = end($input);
-						if (';' === $next || '' === trim($next)) {
-							array_pop($input);
-						} else {
-							break;
-						}
-					}
-					break;
-
 				default: 
+					$whitespace = '';
+					
 					// Replace runs of whitespace with single space.
 					if ('' === trim($token)) {
-						$recent_whitespace = [$token];
 						while ($input && '' === trim(end($input))) {
-							$recent_whitespace[] = array_pop($input);
+							$whitespace .= array_pop($input);
 						}
 						$token = ' ';
-					} else {
-						$recent_whitespace = [];
 					}
 			}
 			
 			// Append the current token to the output.
 			$output[] = $token;
 		}
+
+		// Collapse redundant semicolons into a single semicolon.
+		$input = array_reverse($output);
+		$output = [];
+		
+		while ($input) {
+			$token = array_pop($input);
+			$output[] = $token;
+			if (';' === $token) {
+				while ($input) {
+					switch (end($input)) {
+						case ';':
+						case ' ':
+							array_pop($input);
+							break;
+						case '/**/':
+							array_pop($input);
+							// Comments get replaced with an empty string in
+							// case it's a comment that needs to be preserved.
+							$output[] = '';
+							break;
+						default:
+							break 2;
+					}
+				}
+			}
+		}
+
 		return $output;
 	}
-	
+
 	// Trace backwards through the input, looking for closing braces
 	// in order to remove empty rulesets and trailing semicolons.
 	private function blocks(&$input) {
@@ -169,17 +155,22 @@ class Minifier {
 	private function blocks_tail(&$input, &$output) {
 		// When found, pop off semicolons, spaces, and empty comments
 		// until we reach something else.
+		$keep = [];
 		while ($input) {
 			$token = array_pop($input);
 			switch ($token) {
+				// Strip these and keep going.
 				case ';':
 				case ' ':
+					break;
+					
+				// Keep these and keep going.
+				case '':
 				case '/**/':
-					// Skip empty comments. Non-empties are handled
-					// in the default case.
+					$keep[] = $token;
 					break;
 
-				// If that something else is a closing brace,
+				// If the something else is a closing brace,
 				// it's a nested block. process that one recursively
 				// before continuing with this one, 'cause it might be
 				// empty too.
@@ -209,15 +200,9 @@ class Minifier {
 				default:
 					// If anything else was found, keep it.
 					$input[] = $token;
-				
-					// If that something else was not a comment, we're done
-					// optimizing the tail end of this block, so push the
-					// closing brace (the one that caused blocks_tail() to be
-					// called in the first place) onto the output.
-					if ('/*' !== substr($token, 0, 2)) {
-						$output[] = '}';
-						return;
-					}
+					$output[] = '}';
+					array_splice($output, count($output), 0, array_reverse($keep));
+					return;
 			}
 		}
 	}
@@ -411,6 +396,46 @@ class Minifier {
 		return $output;
 	}
 	
+	// Replace comment placeholders with real comments.
+	private function comments(&$input) {
+		$comment_pattern = '#^/\*.*?\*/$#s';
+		$filter = $this->option('comment_filter');
+		$safe = ["\n", ' ', ',', ';', '{', '}'];
+		
+		$n = 0;
+		$count = count($input);
+		$tailing_newline = true; // Treat the beginning of the file as a newline.
+		for ($i = 0; $i < $count; $i++) {
+			$token = $input[$i];
+			$leading_newline = $tailing_newline ? '' : "\n";
+			$tailing_newline = false;
+			if ('' === $token || '/**/' === $token) {
+				$comment = $this->comments[$n];
+				$result = $filter($comment);
+				if (
+					!is_string($result) ||
+					!preg_match($comment_pattern, $result)
+				) {
+					$result = false;
+				}
+				if ($result) {
+					$whitespace = $this->whitespace[$n];
+					if ($whitespace) {
+						$whitespace = preg_replace(
+							'#^\s*?([^\r\n]*)$#m',
+							'\\1',
+							$whitespace
+						);
+						$result = $leading_newline . $whitespace . $result . "\n";
+						$tailing_newline = true;
+					}
+					$input[$i] = $result;
+				}
+				$n++;
+			}
+		}
+	}
+	
 	// Prepare for returning tokens, by combining or further splitting 
 	// some of the tokens where it didn't matter just for minification.
 	private function meld(&$input) {
@@ -420,6 +445,7 @@ class Minifier {
 		$number_start = '#^[-+.\d]#';
 		$number_chars = '#^[-+.\da-z]+$#i';
 		$number = '#^[-+]?(\d*\.)?\d+[a-z]*$#i';
+		
 		while ($input) {
 			$token = array_pop($input);
 			
@@ -446,11 +472,16 @@ class Minifier {
 			}
 			
 			switch ($token) {
+				case '':
+					// Don't include empty strings in the output.
+					break;
+					
 				// Combine each dot, hash, or at, with whatever token follows it.
 				case '.':
 				case '#':
 				case '@':
 					$token .= array_pop($input);
+					$output[] = $token;
 					break;
 
 				// Combine each equality operator into a single token.
@@ -462,23 +493,33 @@ class Minifier {
 					if ('=' === end($input)) {
 						$token .= array_pop($input);
 					}
+					$output[] = $token;
 					break;
+				
+				default:
+					$output[] = $token;
 			}
-			$output[] = $token;
+			
 		}
 		return $output;
 	}
 
 	// Strip whitespace and comments from the end of the input or output.
 	private function strip(&$array) {
-		// This is the most-called method in the class.
-		// Don't be tempted to include non-empty comments in this somehow.
-		// The speed of this method relies to being able to quickly check
-		// which tokens to strip based on its membership in the $strip array.
-		// Non-empty comments shouldn't be in weird places anyway.
-		$strip = [' ', '/**/'];
-		while (in_array(end($array), $strip)) {
-			array_pop($array);
+		$keep = ['', '/**/'];
+		$count = 0;
+		while ($array) {
+			if (' ' === end($array)) {
+				array_pop($array);
+			} else if (in_array(end($array), $keep)) {
+				$count++;
+				array_pop($array);
+			} else {
+				break;
+			}
+		}
+		while (0 < $count--) {
+			$array[] = '';
 		}
 	}
 	

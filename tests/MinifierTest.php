@@ -98,5 +98,44 @@ class MinifierTest extends \PHPUnit\Framework\TestCase {
 			$this->assertTrue(true); // Make the test un-risky.
 		}
 	}
+	
+	function special($name, &$exp, &$src) {
+		$prefix = __DIR__ . '/test-data/_special/' . $name;
+		$exp = file_get_contents($prefix . '/exp.css');
+		$src = file_get_contents($prefix . '/src.css');
+	}
+	
+	function comments($name, $filter) {
+		$this->special($name, $exp, $src);
+		$result = $this->minify($src, ['comments_filter' => $filter]);
+		$this->assertEquals($exp, $result);
+	}
+	
+	function test_comments() {
+		$this->comments('comments', function ($comment) {
+			if (false !== strpos($comment, '@keep')) {
+				return $comment;
+			}
+		});
+		$this->comments('comments-indent', function ($comment) {
+			if (false !== strpos($comment, '@keep')) {
+				return $comment;
+			}
+		});
+		$this->comments('comments-none', function ($comment) {
+			return false;
+		});
+		
+		// to-do: why is this one hanging?
+		$this->comments('comments-weird', function ($comment) {
+			if (false !== strpos($comment, '@keep')) {
+				return $comment;
+			}
+		});
+	}
+	
+	function test_tokens() {
+		// to-do
+	}
 }
 

@@ -1,0 +1,11 @@
+/**
+ * @keep this comment intact.
+ */
+@media screen and (max-width: 500px) {
+	/**
+	 * Not keeping this one.
+	 */
+	a {
+		color: red
+	}
+}
