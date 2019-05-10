@@ -19,11 +19,13 @@ class Minifier {
 			'tokenoids' => false,
 		], $options);
 
+		// If the comments option has a value that's not callable, flag it so.
 		$comment_filter = $options['comments'];
 		if (!is_callable($comment_filter)) {
 			$comment_filter = false;
 		}
 
+		// Tokenize and minify.
 		$tokens = $min->tokenize($css, $comment_filter);
 		if (false === $tokens) {
 			return false;
@@ -31,6 +33,8 @@ class Minifier {
 		$tokens = $min->semicolons($tokens);
 		$tokens = $min->blocks($tokens);
 		$tokens = $min->spaces($tokens);
+		
+		// Restore comments if there's a filter.
 		if ($comment_filter) {
 			$min->comments($tokens);
 		}
@@ -52,6 +56,13 @@ class Minifier {
 	private function tokenize($css, $comment_filter) {
 		$boundaries = '#(?<=[^\w-])|(?=[^\w-])#s';
 		$comment_pattern = '#^/\*.*?\*/$#s';
+		
+		// Convert Windows linebreaks so that the tokenizer doesn't have to
+		// deal with the possibility of a backslash that escapes the next
+		// two characters instead of just one.
+		$css = preg_replace('#\r\n#s', "\n", $css);
+		
+		// Split into proto-tokens.
 		$input = array_reverse(preg_split($boundaries, $css));
 		
 		$output = [];
@@ -88,9 +99,13 @@ class Minifier {
 						if (!$input) {
 							return false; // Couldn't find the ending quote.
 						}
-						$token .= $next = array_pop($input);;
-						if ('\\' === $next) {
-							$token .= array_pop($input);
+						$token .= $next = array_pop($input);
+						switch ($next) {
+							case '\\':
+								$token .= array_pop($input);
+								break;
+							case "\n":
+								return false; // Unescaped line break.
 						}
 					} while ($next !== $quote);
 					break;
@@ -321,8 +336,8 @@ class Minifier {
 		$CALC  = 1;
 		$NTH   = 2;
 
-		// A pattern for matching possibly-hyphenated words.
-		$word = '#^\w[\w-]*#';
+		// A pattern for matching six-hex colors that could be three-hex.
+		$color = '#([0-9a-f])\1([0-9a-f])\2([0-9a-f])\3#';
 	
 		// Strip whitespace from the beginning and end,
 		// and keep the array reversed so we can pop instead of shift.
@@ -382,7 +397,21 @@ class Minifier {
 						$this->strip($output);
 					}
 					break;
-			
+
+				case '#':
+					// This one isn't about spaces, but it's piggybacking 
+					// here because it needs to know where we are.
+					// If we're not in a selector (or an @-rule incidentally),
+					// this is a color.
+					if ('{' !== $this->nearest($input, '{};')) {
+						// Reduce it from six hex digits to three if possible.
+						if (preg_match($color, strtolower(end($input)), $matches)) {
+							array_pop($input);
+							$token .= $matches[1] . $matches[2] . $matches[3];
+						}
+					}
+					break;
+				
 				// Strip whitespace to the right of these.
 				case '[':
 				case '(':
@@ -522,6 +551,8 @@ class Minifier {
 	}
 	
 	// Replace preserved comment placeholders with real comments.
+	// This is unlike other methods in that it operates directly on the $input
+	// array instead of returning a new $output array.
 	private function comments(&$input) {
 		// Tokens that are always safe to add whitespace next to.
 		$tokens_safe = [' ', ',', ';', '{', '}'];

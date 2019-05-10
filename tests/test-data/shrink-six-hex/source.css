@@ -1,0 +1,6 @@
+p#aABbcC {
+	border-color: #aABbcC #22Ee44 #12aabc #22GG00; /* an invalid one at the end. */
+}
+p #7788aa {
+	border-color: #7788AA #CCEEII #FF00CC #FEDD66; /* an invalid one in the middle. */
+}
