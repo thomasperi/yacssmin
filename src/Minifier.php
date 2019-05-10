@@ -24,7 +24,6 @@ class Minifier {
 			$comment_filter = false;
 		}
 
-
 		$tokens = $min->tokenize($css, $comment_filter);
 		if (false === $tokens) {
 			return false;
@@ -168,7 +167,8 @@ class Minifier {
 						case ' ':
 							break;
 							
-						// Keep but skip over comments for now.
+						// Keep but skip over all comments, for now.
+						// Their time will come.
 						case '/**/':
 						case '/*_*/':
 							$output[] = $token;
@@ -179,6 +179,8 @@ class Minifier {
 						default:
 							break 2;
 					}
+					// We haven't found our 'anything else' yet,
+					// so pop the next token.
 					$token = array_pop($input);
 				}
 			} // `break 2` leads here
@@ -188,7 +190,7 @@ class Minifier {
 	}
 
 	// Trace backwards through the input, looking for closing braces
-	// in order to remove empty rulesets and trailing semicolons.
+	// in order to remove empty blocks and trailing semicolons.
 	private function blocks(&$input) {
 		$output = [];
 		while ($input) {
@@ -200,51 +202,116 @@ class Minifier {
 		return array_reverse($output);
 	}
 	
-	// Recursive helper method for blocks().
+	// Deal with the contents of a block, recursively.
 	private function blocks_recursive(&$input, &$output) {
+		$found_comments = 0;
 		while ($input) {
-			$output[] = $token = array_pop($input);
-			switch ($token) {
+			switch ($token = array_pop($input)) {
 				// Strip these and keep going.
 				case ';':
 				case ' ':
-				case '/**/': // Comments that didn't pass the filter.
-					array_pop($output);
+				case '/**/':
 					break;
+				
+				// Preserved comments get stripped too, but keep count.
+				case '/*_*/':
+					$found_comments++;
+					break;
+				
+				// Handle nested blocks recursively.
 				case '}':
+					// But first, output all the comments so far.
+					if ($found_comments > 0) {
+						$this->flush_comments($output, $found_comments);
+					}
+					// Output the brace.
+					$output[] = $token;
+					// Then, deal with the nested block's contents.
 					$this->blocks_recursive($input, $output);
 					break;
+				
+				// Beginning of the block, probably empty,
+				// but maybe there were preserved comments inside it.
 				case '{':
-					// It's an empty block.
-					// Check whether the rule for the block has comments.
-					
-					$has_comment = false;
-					$buffer = [];
-					while ($input) {
-						$buffer[] = $tok = array_pop($input);
-						switch ($tok) {
-							case ';':
-							case '{':
-							case '}':
-								$input[] = array_pop($buffer);
-								break 2;
-							case '/*_*/':
-								$has_comment = true;
-						}
-					}
-					if ($has_comment) {
-						array_splice($output, count($output), 0, $buffer);
+					// If there were preserved comments in the block,
+					// the block isn't empty after all.
+					if ($found_comments > 0) {
+						// Output the number of comments found.
+						$this->flush_comments($output, $found_comments);
+						// Output the brace.
+						$output[] = $token;
 					} else {
-						array_pop($output);
-						array_pop($output);
+						// But if it really is empty, deal with that.
+						// Output the brace.
+						$output[] = $token;
+						// Check the block's rule for comments before
+						// removing the block and the rule.
+						$this->blocks_empty($input, $output);
 					}
+					// We're done with this block either way.
 					return;
+				
+				// If we find anything else, there's nothing more to optimize
+				// in this block, so put whatever we found back on the input
+				// and output any comments we might have passed over.
 				default:
+					$input[] = $token;
+					if ($found_comments > 0) {
+						$this->flush_comments($output, $found_comments);
+					}
 					return;
 			}
 		}
 	}
 	
+	// It's an empty block. Check whether the rule for the
+	// block has comments that are being preserved.
+	private function blocks_empty(&$input, &$output) {
+		$found_comments = 0;
+		$contains_comment = false;
+		$buffer = [];
+		while ($input) {
+			switch ($buffer[] = array_pop($input)) {
+				case ';':
+				case '{':
+				case '}':
+					// This character isn't part of the rule for
+					// the block, so remove it from the buffer and
+					// put it back on the input.
+					$input[] = array_pop($buffer);
+					break 2;
+				case '/*_*/':
+					// Pass over preserved comments, but keep a count.
+					$found_comments++;
+					break;
+				default:
+					// If we encounter something else that's not a
+					// comment, and at least one comment has been
+					// encountered, that means the comments are
+					// "inside" the buffer and the buffer can't be
+					// tossed out.
+					if ($found_comments > 0) {
+						$contains_comment = true;
+					}
+			}
+		}
+		// If it's got preserved comments that happened INSIDE the
+		// buffer, put back the buffer and keep the whole block.
+		if ($contains_comment) {
+			array_splice($output, count($output), 0, $buffer);
+		
+		// Otherwise, get rid of the braces and discard the buffer.
+		} else {
+			array_pop($output);
+			array_pop($output);
+			// If it's got preserved comments that were OUTSIDE
+			// the buffer, output just those. All we care about
+			// right now is how many there are, 'cause they're all
+			// the same until they get repopulated.
+			$this->flush_comments($output, $found_comments);
+		}
+	}
+
 	// Decide where to remove white space and comments.
 	private function spaces(&$input) {
 		// Keep track of some contexts we might be inside of.
@@ -411,15 +478,24 @@ class Minifier {
 	// Strip whitespace from the end of the input or output,
 	// preserving comments with empty strings.
 	private function strip(&$array) {
+		// Keep track of how many preserved comments are encountered,
+		// then add them back at the end.
+		$found_comments = 0;
 		while ($array) {
-			switch (end($array)) {
+			switch ($token = array_pop($array)) {
 				case ' ':
 				case '/**/':
-					array_pop($array);
+					break;
+				case '/*_*/':
+					$found_comments++;
 					break;
 				default:
+					$array[] = $token;
 					break 2;
 			}
+		}
+		if ($found_comments > 0) {
+			$this->flush_comments($array, $found_comments);
 		}
 	}
 	
@@ -438,11 +514,18 @@ class Minifier {
 		return false;
 	}
 
-	// Replace comment placeholders with real comments.
+	// Re-insert the number of preserved comments that were counted.
+	private function flush_comments(&$array, &$n) {
+		while (0 < $n--) {
+			$array[] = '/*_*/';
+		}
+	}
+	
+	// Replace preserved comment placeholders with real comments.
 	private function comments(&$input) {
 		// Tokens that are always safe to add whitespace next to.
 		$tokens_safe = [' ', ',', ';', '{', '}'];
-		$tokens_comment = ['/*_*/'];
+		$preserved = '/*_*/';
 	
 		// An array to put the replacement comments in before really replacing
 		// them, so that the loop can still look back at the previous token.
@@ -453,8 +536,8 @@ class Minifier {
 		for ($i = 0; $i <= $last; $i++) {
 			$token = $input[$i];
 
-			// On each comment token we find...
-			if (in_array($token, $tokens_comment)) {
+			// On each preserved comment token we find...
+			if ($preserved === $token) {
 				// Get the next stashed real comment.
 				$comment = $this->comments[$n++];
 
@@ -489,7 +572,7 @@ class Minifier {
 						$pad_head = "\n";
 						// If the next token is not a comment,
 						// also pad the end.
-						if (!in_array($input[$next], $tokens_comment)) {
+						if ($preserved !== $input[$next]) {
 							$pad_tail = "\n";
 						}
 						break;
@@ -497,8 +580,8 @@ class Minifier {
 					// If the previous and next tokens aren't comments
 					// (and we know they aren't safe characters either)
 					// stop looking.
-					if (!in_array($input[$prev], $tokens_comment)
-						&& !in_array($input[$next], $tokens_comment)
+					if ($preserved !== $input[$prev] &&
+						$preserved !== $input[$next]
 					) {
 						break;
 					}
