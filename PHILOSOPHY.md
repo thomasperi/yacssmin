@@ -4,14 +4,13 @@ The ideas that went into YaCSSMin
 ## Why?
 Why write another CSS Minifier? I had a few goals in mind:
 
-* Don't depend on other libraries.
-* Keep the logic readable and maintainable, with minimal regex usage.
-* Don't break any valid CSS, even if there's crazy stuff in there.
-* Don't "accidentally fix" any broken CSS.
-* Do nothing besides minification. No peripheral features like concatenating files and replacing path names. 
+* **No library dependencies.**
+* **No change in behavior** of minified CSS files. Valid CSS shouldn't break even if it's crazy, and *invalid* CSS shouldn't accidentally start working after it's minified.
+* **No bloat.** Just minify CSS code, with no peripheral features like concatenating files and replacing path names. Those things can be done separately.
+* **Readable and maintainable** source code. Use regular expressions for tokenizing, not decision-making.
 
-## The Two Big Challenges
-In CSS, white space and comments are complicated.
+## The Big Two
+White space and comments are the two biggest parts of the CSS file that should be removed during minification. And in CSS, white space and comments are complicated.
 
 ### #1: Whitespace
 
@@ -123,16 +122,17 @@ Simple, effective, and since no human being would ever actually write CSS like t
 
 ## Other Features (and Non-Features)
 
-Here's some other stuff YaCSSMin removes:
+Here's some other stuff YaCSSMin does:
 
-* Empty blocks (and whatever rule or selector the block applies to)
-* Unnecessary semicolons
+* Removes empty blocks (and whatever rule or selector the block applies to)
+* Removes unnecessary semicolons
+* Converts six-digit hex color codes to three-digit where appropriate
 
-Things it *doesn't* do (yet?):
+Stuff it might do in the future:
 
-* Shorten color names and hex codes
+* Convert rgb() and hsl() colors to hex codes
 
-And stuff it will *probably never* do:
+And stuff it will *never* do:
 
 * Bring images inline as data urls
 * Concatenate CSS files
