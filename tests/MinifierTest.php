@@ -39,9 +39,9 @@ class MinifierTest extends \PHPUnit\Framework\TestCase {
 						$original = file_get_contents($subdir_full . $source);
 						$actual = $this->minify($original);
 						
-						// Sanity-check the minified against the tokens array.
-						$tokens = $this->minify($original, ['return_tokens' => true]);
-						$imploded = implode('', $tokens);
+						// Sanity-check the minified against the tokenoids array.
+						$tokenoids = $this->minify($original, ['tokenoids' => true]);
+						$imploded = implode('', $tokenoids);
 						
 						$total++;
 						if ($expected !== $actual) {
@@ -58,7 +58,7 @@ class MinifierTest extends \PHPUnit\Framework\TestCase {
 						} else if ($actual !== $imploded) {
 							echo 'X';
 							$errors[] = [
-								'ERROR' => 'Imploded tokens did not equal minified string.',
+								'ERROR' => 'Imploded tokenoids did not equal minified string.',
 								'FILE' => $subdir . $source,
 								'MINIFIED' => $actual,
 								'IMPLODED' => $imploded,
@@ -107,35 +107,76 @@ class MinifierTest extends \PHPUnit\Framework\TestCase {
 	
 	function comments($name, $filter) {
 		$this->special($name, $exp, $src);
-		$result = $this->minify($src, ['comments_filter' => $filter]);
+		$result = $this->minify($src, ['comments' => $filter]);
 		$this->assertEquals($exp, $result);
 	}
 	
 	function test_comments() {
-		$this->comments('comments', function ($comment) {
+		$keep = function ($comment) {
 			if (false !== strpos($comment, '@keep')) {
 				return $comment;
 			}
-		});
-		$this->comments('comments-indent', function ($comment) {
-			if (false !== strpos($comment, '@keep')) {
-				return $comment;
-			}
-		});
+		};
 		$this->comments('comments-none', function ($comment) {
 			return false;
 		});
+		$this->comments('comments', $keep);
+		$this->comments('comments-indent', $keep);
+		$this->comments('comments-weird', $keep);
+		$this->comments('comments-empty-blocks', $keep);
+	}
+
+	function test_unbalanced() {
+		// Missing brace
+		$this->assertFalse($this->minify(
+			'@media (min-width: 300px) { .foo { color: red; }'
+		));
 		
-		// to-do: why is this one hanging?
-		$this->comments('comments-weird', function ($comment) {
-			if (false !== strpos($comment, '@keep')) {
-				return $comment;
-			}
-		});
+		// Extra brace
+		$this->assertFalse($this->minify(
+			'@media (min-width: 300px) { .foo { color: red; }}}'
+		));
+		
+		// Missing bracket
+		$this->assertFalse($this->minify(
+			'.foo [name=bar { color: red; }'
+		));
+
+		// Extra bracket
+		$this->assertFalse($this->minify(
+			'.foo [name=bar]] { color: red; }'
+		));
+
+		// Wrong delimiter opening
+		$this->assertFalse($this->minify(
+			'.foo { top: calc( 100px + [ 2em - 1rem ) ); }'
+		));
+
+		// Wrong delimiter closing
+		$this->assertFalse($this->minify(
+			'.foo { top: calc( 100px + ( 2em - 1rem ] ); }'
+		));
+
+		// Unclosed double quote
+		$this->assertFalse($this->minify(
+			'.foo:before { content: "foo; }'
+		));
+
+		// Unclosed single quote
+		$this->assertFalse($this->minify(
+			".foo:before { content: 'foo; }"
+		));
+
+		// Unclosed single quote because of escape
+		$this->assertFalse($this->minify(
+			'.foo:before { content: "foo\\"; }'
+		));
+
+		// Unclosed single quote because of escape
+		$this->assertFalse($this->minify(
+			".foo:before { content: 'bar\\'; }"
+		));
 	}
-	
-	function test_tokens() {
-		// to-do
-	}
+
 }
 

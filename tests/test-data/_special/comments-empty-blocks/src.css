@@ -1,0 +1,15 @@
+.foo :hover {
+
+}
+.bar/* hello */:hover {
+
+}
+.zote :hover {
+	/* hello */
+}
+.sbor :hover {
+	/* @keep 1 */
+}
+.thed/* @keep 2 */:hover {
+	
+}
