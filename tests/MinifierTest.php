@@ -112,14 +112,18 @@ class MinifierTest extends \PHPUnit\Framework\TestCase {
 	}
 	
 	function test_comments() {
+		$this->comments('comments-none', function ($comment) {
+			return false;
+		});
+		$this->comments('comments-all', function ($comment) {
+			return $comment;
+		});
+		
 		$keep = function ($comment) {
 			if (false !== strpos($comment, '@keep')) {
 				return $comment;
 			}
 		};
-		$this->comments('comments-none', function ($comment) {
-			return false;
-		});
 		$this->comments('comments', $keep);
 		$this->comments('comments-indent', $keep);
 		$this->comments('comments-weird', $keep);

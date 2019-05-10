@@ -20,11 +20,6 @@ class Minifier {
 		], $options);
 
 		$comment_filter = $options['comments'];
-		if (true === $comment_filter) {
-			$comment_filter = function () {
-				return true;
-			};
-		}
 		if (!is_callable($comment_filter)) {
 			$comment_filter = false;
 		}
@@ -120,6 +115,7 @@ class Minifier {
 						// reinstatement.
 						if ($comment_filter &&
 							($comment = $comment_filter(implode('', $comment))) &&
+							is_string($comment) &&
 							preg_match($comment_pattern, $comment)
 						) {
 							$this->comments[] = $comment;
@@ -344,12 +340,14 @@ class Minifier {
 					break;
 
 				// Strip whitespace around `-` tokens only inside :nth-X()
-				case '-':
-					if ($NTH === end($inside)) {
-						$this->strip($input);
-						$this->strip($output);
-					}
-					break;
+// Commented out because it's handled in the default case,
+// but could still be useful to see.
+// 				case '-':
+// 					if ($NTH === end($inside)) {
+// 						$this->strip($input);
+// 						$this->strip($output);
+// 					}
+// 					break;
 
 				// Strip whitespace around `+` tokens only outside calc()
 				case '+':
