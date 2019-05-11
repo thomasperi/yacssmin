@@ -1,3 +1,4 @@
+/* This file uses Windows linebreaks (CRLF) and should stay that way. */
 p::before { 
   content: "\
   ";
