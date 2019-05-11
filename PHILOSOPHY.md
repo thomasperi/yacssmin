@@ -16,32 +16,40 @@ White space and comments are the two biggest parts of the CSS file that should b
 
 In some contexts whitespace is ignored, and in others it has meaning. Here's an example in which all of the whitespace is completely meaningless and can be stripped away:
 
-    div {
-        color: red;
-    }
+```css
+div {
+    color: red;
+}
+```
     
 Without any of the whitespace it means exactly the same thing:
-    
-    div{color:red;}
+
+```css
+div{color:red;}
+```
 
 But of course that's not the case with all whitespace. These three selectors differ only in whitespace, but select different elements.
 
-    div .foo    /* An element of class "foo", inside a div */
-    div.foo     /* A div of class "foo" */
-    div. foo    /* Malformed; doesn't select anything */
+```css
+div .foo    /* An element of class "foo", inside a div */
+div.foo     /* A div of class "foo" */
+div. foo    /* Malformed; doesn't select anything */
+```
     
 It's easy to see why the space in the first example shouldn't be stripped. But even the malformed selector should be left how it is, so that the minified stylesheet continues to behave exactly as it did before it was minified. Inadvertently fixing malformed code would allow problems to go unnoticed.
 
 There are other contexts where whitespace matters. For example:
 
-    calc( 100rem - 10px ) /* This works. */
-    calc(100rem - 10px)   /* This works. */
-    calc(100rem-10px)     /* This doesn't work. */
-    calc (100rem - 10px)  /* This doesn't work. */
+```css
+calc( 100rem - 10px ) /* This works. */
+calc(100rem - 10px)   /* This works. */
+calc(100rem-10px)     /* This doesn't work. */
+calc (100rem - 10px)  /* This doesn't work. */
 
-    @media screen and (max-width: 300px)  /* This works. */
-    @media screen and ( max-width:300px ) /* This works. */
-    @media screen and(max-width: 300px)   /* This doesn't work. */
+@media screen and (max-width: 300px)  /* This works. */
+@media screen and ( max-width:300px ) /* This works. */
+@media screen and(max-width: 300px)   /* This doesn't work. */
+```
 
 Therefore, YaCSSMin strips whitespace where it doesn't change the meaning of the code:
 
@@ -67,56 +75,68 @@ Sounds simple enough, right? But the reality is more complicated. Comments in CS
 
 Fortunately the vast majority of comments in real-world stylesheets are adjacent to whitespace (tabs and linebreaks), like this:
 
-    /* 
-     * This comment has the beginning of the file before it
-     * and a linebreak after it.
-     */
-    div {
-        /* This comment has a tab before it and a linebreak after it */
-        color: red;
-        
-        position: relative;
-    }
+```css
+/* 
+ * This comment has the beginning of the file before it
+ * and a linebreak after it.
+ */
+div {
+    /* This comment has a tab before it and a linebreak after it */
+    color: red;
+}
+```
     
 Even most weirdly-placed comments are usually at least adjacent to the whitespace-safe characters listed above and can safely be stripped in those contexts:
     
-    a {color: green/* This comment has a brace after it. */}
+```css
+a {color: green/* This comment has a brace after it. */}
+```
 
 A super-weird example:
 
-    div+/* This comment is next to a + outside calc. */p { color: red; }
+```css
+div+/* This comment is next to a + outside calc. */p { color: red; }
+```
 
 But what do we do with corner cases where the behavior of comments is unpredictable? Here are three contrasting examples:
 
 **1.** Comments inside calc() expressions seem to be **equivalent to nothing**. Replacing the comment with a space accidentally fixes broken CSS code:
 
-    calc(100rem/* foo */- 10px)  /* Broken */
-    calc(100rem - 10px)          /* Accidental Fix */
+```css
+calc(100rem/* foo */- 10px)  /* Broken */
+calc(100rem - 10px)          /* Accidental Fix */
+```
 
 **2.** Comments between words in @-rules seem to be **equivalent to spaces**. Replacing the comment with nothing breaks working code:
 
-    @media screen/* foo */and (max-width: 300px)  /* This works. */
-    @media screenand (max-width: 300px)           /* This breaks it. */
+```css
+@media screen/* foo */and (max-width: 300px)  /* This works. */
+@media screenand (max-width: 300px)           /* This breaks it. */
+```
 
 **3.** Comments between words inside a selector are even more nefarious. They **don't act as spaces**, but they **still separate tokens** the way spaces would:
 
-	section/* foo */div     /* Comment:  Broken         */
-	section div             /* Space:    Accidental Fix */
-	sectiondiv              /* No-space: Stays broken   */
-	
-	sect/* foo */ion div    /* Comment:  Broken         */
-	sect ion div            /* Space:    Stays broken   */
-	section p               /* No-space: Accidental Fix */
+```css
+section/* foo */div     /* Comment:  Broken         */
+section div             /* Space:    Accidental Fix */
+sectiondiv              /* No-space: Stays broken   */
+
+sect/* foo */ion div    /* Comment:  Broken         */
+sect ion div            /* Space:    Stays broken   */
+section p               /* No-space: Accidental Fix */
+```
 
 That means that in order to know whether to strip the comment or replace it with a space inside selectors, we would need to compare the words adjoining a comment with all known HTML tags.
 
 But no. YaCSSMin instead "chooses not to decide" (*a la* Rush) and leaves those comments in place. It just converts them to **empty** comments.
 
-	section/* foo */div     /* Comment:  Broken         */
-	section/**/div          /* Empty:    Stays broken   */
+```css
+section/* foo */div     /* Comment:  Broken         */
+section/**/div          /* Empty:    Stays broken   */
 
-	sect/* foo */ion div    /* Comment:  Broken         */
-	sect/**/ion div         /* Empty:    Stays broken   */
+sect/* foo */ion div    /* Comment:  Broken         */
+sect/**/ion div         /* Empty:    Stays broken   */
+```
 
 Simple, effective, and since no human being would ever actually write CSS like this, we don't need to worry about the three or four extra bytes we could have saved by deciding whether to replace it with a space or to strip it.
 
