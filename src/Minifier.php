@@ -478,15 +478,18 @@ class Minifier {
 					break;
 				case '*':
 					switch (end($inside)) {
+						// Strip spaces only to the left inside brackets
 						case '[':
 							$this->strip($output);
 							break;
+						// Strip spaces on both sides in calc
 						case $CALC:
 							$this->strip($input);
 							$this->strip($output);
 					}
 					break;
 				case '/':
+					// Strip spaces on both sides in calc
 					if ($CALC === end($inside)) {
 						$this->strip($input);
 						$this->strip($output);
@@ -508,9 +511,24 @@ class Minifier {
 					break;
 
 				default:
-					// Strip whitespace inside :nth-X(...) 
-					if ($NTH === end($inside)) {
-						$this->strip($input);
+					switch (end($inside)) {
+						// Strip whitespace inside :nth-X(...) 
+						case $NTH:
+							$this->strip($input);
+							break;
+						// Inside brackets, strip quotes from values that start
+						// with a word character and 
+						case '[':
+							if ('=' === end($output)) {
+								switch (substr($token, 0, 1)) {
+									case '"':
+									case "'":
+										$content = substr($token, 1, count($token) - 2);
+										if (preg_match('#^[_a-z][-0-9_a-z]*$#i', $content)) {
+											$token = $content;
+										}
+								}
+							}
 					}
 			}
 

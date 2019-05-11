@@ -1,0 +1,18 @@
+a[href="/"] {
+	color: red;
+}
+b a[href='/'] {
+	color: blue;
+}
+p[class="foo-bar_zote123"] {
+	color: red;
+}
+p[class="w"] {
+	color: red;
+}
+div[class="-z9"] {
+	color: red;
+}
+div[class="9x"] {
+	color: red;
+}

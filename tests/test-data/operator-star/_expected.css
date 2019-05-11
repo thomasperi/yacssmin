@@ -1,1 +1,1 @@
-div[class*="foo"]{left:calc(20px*100%)}
+div[class*=foo]{left:calc(20px*100%)}
