@@ -469,11 +469,26 @@ class Minifier {
 					break;
 				case '^':
 				case '|':
-				case '*':
 				case '$':
 					// Only strip whitespace to the left of these,
 					// and only inside brackets. 
 					if ('[' === end($inside)) {
+						$this->strip($output);
+					}
+					break;
+				case '*':
+					switch (end($inside)) {
+						case '[':
+							$this->strip($output);
+							break;
+						case $CALC:
+							$this->strip($input);
+							$this->strip($output);
+					}
+					break;
+				case '/':
+					if ($CALC === end($inside)) {
+						$this->strip($input);
 						$this->strip($output);
 					}
 					break;
