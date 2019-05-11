@@ -1,0 +1,2 @@
+/* Collapsing double colons is an accidental fix */
+p{color::red}
