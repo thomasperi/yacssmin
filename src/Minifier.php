@@ -4,6 +4,7 @@ namespace ThomasPeri\YaCSSMin;
 /**
  * Yet Another CSS Minifier
  * @author Thomas Peri <tjperi@gmail.com>
+ * @version 0.6.3
  * @license MIT
  */
 class Minifier {
