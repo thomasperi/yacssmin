@@ -128,6 +128,7 @@ class MinifierTest extends \PHPUnit\Framework\TestCase {
 		$this->comments('comments-indent', $keep);
 		$this->comments('comments-weird', $keep);
 		$this->comments('comments-empty-blocks', $keep);
+		$this->comments('comments-empty-blocks-nested', $keep);
 	}
 
 	function test_unbalanced() {

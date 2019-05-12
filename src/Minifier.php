@@ -112,7 +112,7 @@ class Minifier {
 				
 				// Reduce comments to a single token.
 				case '/':
-					if ('*' == end($input)) {
+					if ('*' === end($input)) {
 						$token = '/**/';
 						array_pop($input);
 
@@ -177,14 +177,13 @@ class Minifier {
 				// stripped, strip them until something else is encountered.
 				while ($input) {
 					switch ($token) {
-						// Strip spaces and semicolons.
+						// Strip semicolons, spaces, and empty comments.
 						case ';':
 						case ' ':
+						case '/**/':
 							break;
 							
-						// Keep but skip over all comments, for now.
-						// Their time will come.
-						case '/**/':
+						// Skip over preserved comments, but keep them.
 						case '/*_*/':
 							$output[] = $token;
 							break;
@@ -219,7 +218,8 @@ class Minifier {
 	
 	// Deal with the contents of a block, recursively.
 	private function blocks_recursive(&$input, &$output) {
-		$found_comments = 0;
+		$comment_count = 0;
+		$comment_found = false;
 		while ($input) {
 			switch ($token = array_pop($input)) {
 				// Strip these and keep going.
@@ -230,15 +230,14 @@ class Minifier {
 				
 				// Preserved comments get stripped too, but keep count.
 				case '/*_*/':
-					$found_comments++;
+					$comment_count++;
+					$comment_found = true;
 					break;
 				
 				// Handle nested blocks recursively.
 				case '}':
 					// But first, output all the comments so far.
-					if ($found_comments > 0) {
-						$this->flush_comments($output, $found_comments);
-					}
+					$this->flush_comments($output, $comment_count);
 					// Output the brace.
 					$output[] = $token;
 					// Then, deal with the nested block's contents.
@@ -250,9 +249,9 @@ class Minifier {
 				case '{':
 					// If there were preserved comments in the block,
 					// the block isn't empty after all.
-					if ($found_comments > 0) {
-						// Output the number of comments found.
-						$this->flush_comments($output, $found_comments);
+					if ($comment_found) {
+						// Output the comments found.
+						$this->flush_comments($output, $comment_count);
 						// Output the brace.
 						$output[] = $token;
 					} else {
@@ -271,9 +270,7 @@ class Minifier {
 				// and output any comments we might have passed over.
 				default:
 					$input[] = $token;
-					if ($found_comments > 0) {
-						$this->flush_comments($output, $found_comments);
-					}
+					$this->flush_comments($output, $comment_count);
 					return;
 			}
 		}
@@ -282,7 +279,7 @@ class Minifier {
 	// It's an empty block. Check whether the rule for the
 	// block has comments that are being preserved.
 	private function blocks_empty(&$input, &$output) {
-		$found_comments = 0;
+		$comment_count = 0;
 		$contains_comment = false;
 		$buffer = [];
 		while ($input) {
@@ -297,7 +294,7 @@ class Minifier {
 					break 2;
 				case '/*_*/':
 					// Pass over preserved comments, but keep a count.
-					$found_comments++;
+					$comment_count++;
 					break;
 				default:
 					// If we encounter something else that's not a
@@ -305,7 +302,7 @@ class Minifier {
 					// encountered, that means the comments are
 					// "inside" the buffer and the buffer can't be
 					// tossed out.
-					if ($found_comments > 0) {
+					if ($comment_count > 0) {
 						$contains_comment = true;
 					}
 			}
@@ -323,7 +320,7 @@ class Minifier {
 			// the buffer, output just those. All we care about
 			// right now is how many there are, 'cause they're all
 			// the same until they get repopulated.
-			$this->flush_comments($output, $found_comments);
+			$this->flush_comments($output, $comment_count);
 		}
 	}
 
@@ -542,22 +539,22 @@ class Minifier {
 	private function strip(&$array) {
 		// Keep track of how many preserved comments are encountered,
 		// then add them back at the end.
-		$found_comments = 0;
+		$comment_count = 0;
 		while ($array) {
 			switch ($token = array_pop($array)) {
 				case ' ':
 				case '/**/':
 					break;
 				case '/*_*/':
-					$found_comments++;
+					$comment_count++;
 					break;
 				default:
 					$array[] = $token;
 					break 2;
 			}
 		}
-		if ($found_comments > 0) {
-			$this->flush_comments($array, $found_comments);
+		if ($comment_count > 0) {
+			$this->flush_comments($array, $comment_count);
 		}
 	}
 	
