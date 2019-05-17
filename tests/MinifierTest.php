@@ -39,10 +39,6 @@ class MinifierTest extends \PHPUnit\Framework\TestCase {
 						$original = file_get_contents($subdir_full . $source);
 						$actual = $this->minify($original);
 						
-						// Sanity-check the minified against the tokenoids array.
-						$tokenoids = $this->minify($original, ['tokenoids' => true]);
-						$imploded = implode('', $tokenoids);
-						
 						$total++;
 						if ($expected !== $actual) {
 							echo 'X';
@@ -51,17 +47,6 @@ class MinifierTest extends \PHPUnit\Framework\TestCase {
 								'FILE' => $subdir . $source,
 								'EXPECTED' => $expected,
 								'ACTUAL' => $actual,
-								'ORIGINAL' => $original,
-							];
-							$failure++;
-
-						} else if ($actual !== $imploded) {
-							echo 'X';
-							$errors[] = [
-								'ERROR' => 'Imploded tokenoids did not equal minified string.',
-								'FILE' => $subdir . $source,
-								'MINIFIED' => $actual,
-								'IMPLODED' => $imploded,
 								'ORIGINAL' => $original,
 							];
 							$failure++;
@@ -130,6 +115,20 @@ class MinifierTest extends \PHPUnit\Framework\TestCase {
 		$this->comments('comments-empty-blocks', $keep);
 		$this->comments('comments-empty-blocks-nested', $keep);
 	}
+	
+	function test_filter() {
+		$prefix = __DIR__ . '/test-data/_special/filter';
+		$exp = file_get_contents($prefix . '/exp.css');
+		$src = file_get_contents($prefix . '/src.css');
+		$result = $this->minify($src, ['filter' => function ($css, &$strings) {
+			$css = preg_replace('#\bb\b#', 'strong', $css);
+			foreach ($strings as $i => $v) {
+				$strings[$i] = strrev($strings[$i]);
+			}
+			return $css;
+		}]);
+		$this->assertEquals($exp, $result);
+	}
 
 	function test_unbalanced() {
 		// Missing brace
@@ -181,6 +180,18 @@ class MinifierTest extends \PHPUnit\Framework\TestCase {
 		$this->assertFalse($this->minify(
 			".foo:before { content: 'bar\\'; }"
 		));
+
+		// Unescaped newline
+		$this->assertFalse($this->minify(
+			".foo:before { content: 'foo\nbar'; }"
+		));
+		// Contrast with escaped newline working
+		$this->assertEquals(
+			".foo:before{content:'foo\\\nb * ar'}",
+			$this->minify(
+				".foo:before { content: 'foo\\\nb * ar'; }"
+			)
+		);
 	}
 
 }

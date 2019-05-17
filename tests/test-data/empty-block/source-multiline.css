@@ -1,0 +1,12 @@
+/* test that nested empty blocks get removed */
+.foo {
+	z-index: 0;
+	@media screen and
+			(max-width: 300) {
+		@page :left { 
+			@bottom-left-corner {
+				
+			}
+		}
+	}
+}

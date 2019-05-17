@@ -7,7 +7,9 @@ Why write another CSS Minifier? I had a few goals in mind:
 * **No library dependencies.**
 * **No change in behavior** of minified CSS files. Valid CSS shouldn't break even if it's crazy, and *invalid* CSS shouldn't accidentally start working after it's minified.
 * **No bloat.** Just minify CSS code, with no peripheral features like concatenating files and replacing path names. Those things can be done separately.
-* **Readable and maintainable** source code. Use regular expressions for tokenizing, not decision-making.
+* **Readable and maintainable** source code. ~~Use regular expressions for tokenizing, not decision-making.~~
+
+*(Earlier versions of YaCSSMin split the CSS code into an array of tokens, manipulated that array, and then imploded it back together. It was surprisingly fast, but it was a memory hog. The current version uses a series of `preg_replace`s and `preg_replace_callback`s to get the job done, and is about the same speed, but only uses 20% of the memory used by the older versions.)*
 
 ## The Big Two
 White space and comments are the two biggest parts of the CSS file that should be removed during minification. And in CSS, white space and comments are complicated.
@@ -146,18 +148,23 @@ Here's some other stuff YaCSSMin does:
 
 * Removes empty blocks (and whatever rule or selector the block applies to)
 * Removes unnecessary semicolons
-* Converts six-digit hex color codes to three-digit where appropriate
 
-Stuff it might do in the future:
+Features it might someday optionally provide, via the `filter` option:
 
-* Convert rgb() and hsl() colors to hex codes
+* Convert six-digit hex color codes to three-digit where appropriate
+* Convert `rgb()` and `hsl()` colors to hex codes
 
-And stuff it will *never* do:
+And stuff it will probably *never* do:
 
-* Bring images inline as data urls
 * Concatenate CSS files
+* Rewrite URLs relative to the minified stylesheet location
+* Bring images inline as data urls
 * Remove units from zeroes
 
-Inlining images and concatenating stylesheets can be done separately using whatever mechanism you like. These are separate tasks from minifying, so there's no reason for YaCSSMin to do them.
+### Why Not?
+
+Inlining images and concatenating stylesheets can be done separately using whatever mechanism you like. These are separate tasks from minifying, so there's no reason for YaCSSMin to do them. Also, the details of how these things need to be done vary between projects, so it's better to leave them up to the developer entirely.
 
 The reason YaCSSMin will never remove units from zeroes is that there's a high risk of accidentally fixing bad CSS that has units where they shouldn't be. Even though there is a finite number of places where units are *necessary* on zeroes (`calc()` expressions), there are also many places where units should *never* be used, such as `z-index`, `opacity`, and a lot of `flex` properties. Once you consider shorthand values, the logic for removing units only in the right contexts gets long and complicated.
+
+Converting colors is fairly straightforward, and so YaCSSMin might eventually offer a built-in method to call from inside your `filter` function.

@@ -4,7 +4,7 @@ namespace ThomasPeri\YaCSSMin;
 /**
  * Yet Another CSS Minifier
  * @author Thomas Peri <tjperi@gmail.com>
- * @version 0.6.3
+ * @version 0.7.0
  * @license MIT
  */
 class Minifier {
@@ -16,8 +16,8 @@ class Minifier {
 	static function minify($css, $options = []) {
 		$min = new self();
 		$options = array_merge([
+			'filter' => false,
 			'comments' => false,
-			'tokenoids' => false,
 		], $options);
 
 		// If the comments option has a value that's not callable, flag it so.
@@ -26,55 +26,123 @@ class Minifier {
 			$comment_filter = false;
 		}
 
-		// Tokenize and minify.
-		$tokens = $min->tokenize($css, $comment_filter);
-		if (false === $tokens) {
+		// Add spaces at the beginning and end so we don't have to check for 
+		// the beginning and end of the file.
+		$css = ' ' . $css . ' ';
+		
+		// Stash strings and comments to be repopulated later, and do some
+		// basic validation.
+		$css = $min->stash_strings_and_comments($css, $comment_filter);
+		if (false === $css || !$min->balance_delimiters($css)) {
 			return false;
 		}
-		$tokens = $min->semicolons($tokens);
-		$tokens = $min->blocks($tokens);
-		$tokens = $min->spaces($tokens);
-		
-		// Restore comments if there's a filter.
-		if ($comment_filter) {
-			$min->comments($tokens);
-		}
 
-		// Return tokenoids if asked.
-		if ($options['tokenoids']) {
-			return $tokens;
+		// Do all the minification steps.
+		$css = $min->strip_easy_spaces($css);
+		$css = $min->remove_empty_blocks($css);
+		$css = $min->collapse_semicolons($css);
+		$css = $min->do_contextual_replacements($css);
+		
+		// Pass through the user filter if callable.
+		$filter = $options['filter'];
+		if (is_callable($filter)) {
+			$css = $filter($css, $min->strings, $min->$comments);
 		}
 		
-		// Otherwise, just return the minified string.
-		return implode('', $tokens);
+		// Re-populate the stashed strings and comments.
+		$css = $min->unstash_strings_and_comments($css);
+
+		// Remove any leading or trailing spaces.
+		$css = trim($css);
+		
+		return $css;
 	}
 	
-	// All the comments found in the CSS code.
-	private $comments = [];
+	// All the comments and strings found in the CSS code.
+	private $comments = [], $strings = [], $c = 0, $s = 0;
 	
-	// Split a CSS text into tokenoids.
-	// (Not real CSS tokens, but good enough for minification purposes.)
-	private function tokenize($css, $comment_filter) {
-		$boundaries = '#(?<=[^\w-])|(?=[^\w-])#s';
-		$comment_pattern = '#^/\*.*?\*/$#s';
-		
-		// Convert Windows linebreaks so that the tokenizer doesn't have to
-		// deal with the possibility of a backslash that escapes the next
-		// two characters instead of just one.
+	/*
+	 * Stash comments and strings for later.
+	 */
+	private function stash_strings_and_comments($css, $filter) {
+		// Convert Windows linebreaks so that we don't have to deal with the
+		// possibility of a backslash that escapes the next two characters
+		// instead of just one.
 		$css = preg_replace('#\r\n#s', "\n", $css);
 		
-		// Split into proto-tokens.
-		$input = array_reverse(preg_split($boundaries, $css));
+		// Replace strings and comments with placeholders.
 		
-		$output = [];
+		// A string is a single or double quote, then any number, non-greedily,
+		// of any character optionally preceded by a backslash, followed by
+		// either (a) the same quote we started with, (b) a newline, or (c)
+		// the end of the file.
+		$string = '([\'"])(?:\\\\?.)*?(\\1|\n|$)';
+		
+		// A comment is a slash and a star, followed by any number of any
+		// character non-greedily, followed by a star and a slash.
+		$comment = '/\*.*?\*/';
+		
+		// Build a pattern to match either string or comment.
+		$either = '#' . $string . '|' . $comment . '#s';
+		
+		// Build a pattern to test whether something's a comment.
+		$pattern = '#^' . $comment . '$#s';
+		
+		// Allow $this access inside anonymous function.
+		$me = $this;
+		$success = true;
+		$css = preg_replace_callback($either, function ($matches) use ($me, $filter, $pattern, &$success) {
+			$match = $matches[0];
+			switch (substr($match, 0, 1)) {
+				// Strings
+				case '"':
+				case "'":
+					// If the string was terminated by anything other than the
+					// same quote that opened it (newline or end of file), 
+					// that's a problem.
+					if ($matches[1] !== $matches[2]) {
+						$success = false;
+					}
+					// Regardless, for now, stash it like a valid string and
+					// temporarily replace it with an underscored string.
+					$me->strings[] = $match;
+					return '"_"';
+				
+				// Comments
+				case '/':
+					// If there's a callable comment filter...
+					if ($filter &&
+						// ...and it returns something truthy...
+						($comment = $filter($match)) &&
+						// ...and that thing is a string...
+						is_string($comment) &&
+						// ...and it matches the pattern for a comment...
+						preg_match($pattern, $comment)
+					) {
+						// ...then stash it and mark it as stashed with an underscore.
+						$me->comments[] = $comment;
+						return '/*_*/';
+					}
+					// Otherwise, just replace it with an empty comment.
+					return '/**/';
+			}
+		}, $css);
+		
+		if (!$success) {
+			return false;
+		}
+		return $css;
+	}
+	
+	/*
+	 * Ensure that nested delimiters are balanced.
+	 */
+	private function balance_delimiters($css) {
 		$inside = [];
-		while ($input) {
-			$token = array_pop($input);
-			switch ($token) {
-				// If braces and such don't balance, other parts of YaCSSMin
-				// might make different assumptions than a web browser would,
-				// possibly leading either to breakage or to an accidental fix.
-				// To mitigate that risk, refuse to minify such a stylesheet.
+		$success = true;
+		preg_replace_callback('#[{}()[\]]#', function ($matches) use (&$inside, &$success) {
+			$char = $matches[0];
+			switch ($char) {
 				case '{':
 					$inside[] = '}';
 					break;
@@ -84,575 +152,213 @@ class Minifier {
 				case '[':
 					$inside[] = ']';
 					break;
-				case ']':
-				case ')':
-				case '}':
-					if ($token !== array_pop($inside)) {
-						return false;
-					}
-					break;
-					
-				// Combine a quoted string into a single token.
-				case '"':
-				case "'":
-					$quote = $token;
-					do {
-						if (!$input) {
-							return false; // Couldn't find the ending quote.
-						}
-						$token .= $next = array_pop($input);
-						switch ($next) {
-							case '\\':
-								$token .= array_pop($input);
-								break;
-							case "\n":
-								return false; // Unescaped line break.
-						}
-					} while ($next !== $quote);
-					break;
-				
-				// Reduce comments to a single token.
-				case '/':
-					if ('*' === end($input)) {
-						$token = '/**/';
-						array_pop($input);
-
-						// Build the comment by popping things off until the
-						// sequence `*/` has happened.
-						$comment = ['/*'];
-						while ($input && (
-							'*' !== ($comment[] = array_pop($input)) ||
-							'/' !== ($comment[] = array_pop($input))
-						));
-						
-						// If there's a filter and the comment passes it,
-						// replace it with a placeholder token for later
-						// reinstatement.
-						if ($comment_filter &&
-							($comment = $comment_filter(implode('', $comment))) &&
-							is_string($comment) &&
-							preg_match($comment_pattern, $comment)
-						) {
-							$this->comments[] = $comment;
-							$token = '/*_*/';
-						}
-					}
-					break;
-				
-				default: 
-					// Replace runs of whitespace with single space.
-					if ('' === trim($token)) {
-						while ($input && '' === trim(end($input))) {
-							array_pop($input);
-						}
-						$token = ' ';
+				default:
+					if ($char !== array_pop($inside)) {
+						$success = false;
 					}
 			}
-			
-			// Append the current token to the output.
-			$output[] = $token;
-		}
-		
-		// Bail if there's anything left over that we're looking to balance.
-		if ($inside) {
-			return false;
-		}
+			return $char;
+		}, $css);
 
-		return $output;
+		// It's only valid if they were nested properly,
+		// AND there's nothing left over waiting to be balanced.
+		return $success && !$inside;
+	}
+
+	/*
+	 * Strip the spaces from spots where they never matter.
+	 */
+	private function strip_easy_spaces($css) {
+		// Strip whitespace and empty comments around other whitespace,
+		// commas, braces, and semicolons.
+		$css = $this->strip($css, '[\s,;{}]', true, true);
+		
+		// Strip whitespace immediately inside parentheses and brackets.
+		$css = $this->strip($css, '[(\[]', false, true);
+		$css = $this->strip($css, '[)\]]', true, false);
+		
+		// Replace any remaining runs of whitespace with a single space.
+		$css = preg_replace('#\s+#s', ' ', $css);
+		
+		return $css;
 	}
 	
-	// Remove unnecessary semicolons.
-	private function semicolons(&$input) {
-		$input = array_reverse($input);
-		$safe = ['{', '}', ';', false];
-		$output = [];
-		// Loop through the tokens, determining whether to strip things
-		// by looking back at the most recent thing on the output.
+	/*
+	 * Remove empty blocks.
+	 */
+	private function remove_empty_blocks($css) {
+		// To account for nested empty blocks, remove empty blocks until the
+		// removal results in no change.
+		$short = $css;
 		do {
-			$token = array_pop($input);
-			// The first time through this loop, end($output) will be false,
-			// so false is one of the $safe tokens after which it's okay to
-			// strip semicolons and spaces.
-			if (in_array(end($output), $safe, true)) {
-				// Once we've found a token after which semicolons can be
-				// stripped, strip them until something else is encountered.
-				while ($input) {
-					switch ($token) {
-						// Strip semicolons, spaces, and empty comments.
-						case ';':
-						case ' ':
-						case '/**/':
-							break;
-							
-						// Skip over preserved comments, but keep them.
-						case '/*_*/':
-							$output[] = $token;
-							break;
-						
-						// Anything else and we stop looking near this
-						// particular semicolon.
-						default:
-							break 2;
-					}
-					// We haven't found our 'anything else' yet,
-					// so pop the next token.
-					$token = array_pop($input);
+			$css = $short;
+			// Match an empty block along with whatever came before it that's
+			// not the end of something else or the beginning of an outer block.
+			$short = preg_replace_callback('#[^;{}]+\{\}#s', function ($matches) {
+				// Don't remove blocks that have preserved comments in the rule
+				// before the block.
+				$chunk = $matches[0];
+				if (preg_match('#/\*_\*/#', $chunk)) {
+					return $chunk;
 				}
-			} // `break 2` leads here
-			$output[] = $token;
-		} while ($input);
-		return $output;
-	}
-
-	// Trace backwards through the input, looking for closing braces
-	// in order to remove empty blocks and trailing semicolons.
-	private function blocks(&$input) {
-		$output = [];
-		while ($input) {
-			$output[] = $token = array_pop($input);
-			if ('}' === $token) {
-				$this->blocks_recursive($input, $output);
-			}
-		}
-		return array_reverse($output);
+				return '';
+			}, $css);
+		} while ($short !== $css);
+		return $css;
 	}
 	
-	// Deal with the contents of a block, recursively.
-	private function blocks_recursive(&$input, &$output) {
-		$comment_count = 0;
-		$comment_found = false;
-		while ($input) {
-			switch ($token = array_pop($input)) {
-				// Strip these and keep going.
-				case ';':
-				case ' ':
-				case '/**/':
-					break;
-				
-				// Preserved comments get stripped too, but keep count.
-				case '/*_*/':
-					$comment_count++;
-					$comment_found = true;
-					break;
-				
-				// Handle nested blocks recursively.
-				case '}':
-					// But first, output all the comments so far.
-					$this->flush_comments($output, $comment_count);
-					// Output the brace.
-					$output[] = $token;
-					// Then, deal with the nested block's contents.
-					$this->blocks_recursive($input, $output);
-					break;
-				
-				// Beginning of the block, probably empty,
-				// but maybe there were preserved comments inside it.
-				case '{':
-					// If there were preserved comments in the block,
-					// the block isn't empty after all.
-					if ($comment_found) {
-						// Output the comments found.
-						$this->flush_comments($output, $comment_count);
-						// Output the brace.
-						$output[] = $token;
-					} else {
-						// But if it really is empty, deal with that.
-						// Output the brace.
-						$output[] = $token;
-						// Check the block's rule for comments before
-						// removing the block and the rule.
-						$this->blocks_empty($input, $output);
-					}
-					// We're done with this block either way.
-					return;
-				
-				// If we find anything else, there's nothing more to optimize
-				// in this block, so put whatever we found back on the input
-				// and output any comments we might have passed over.
-				default:
-					$input[] = $token;
-					$this->flush_comments($output, $comment_count);
-					return;
-			}
-		}
-	}
-	
-	// It's an empty block. Check whether the rule for the
-	// block has comments that are being preserved.
-	private function blocks_empty(&$input, &$output) {
-		$comment_count = 0;
-		$contains_comment = false;
-		$buffer = [];
-		while ($input) {
-			switch ($buffer[] = array_pop($input)) {
-				case ';':
-				case '{':
-				case '}':
-					// This character isn't part of the rule for
-					// the block, so remove it from the buffer and
-					// put it back on the input.
-					$input[] = array_pop($buffer);
-					break 2;
-				case '/*_*/':
-					// Pass over preserved comments, but keep a count.
-					$comment_count++;
-					break;
-				default:
-					// If we encounter something else that's not a
-					// comment, and at least one comment has been
-					// encountered, that means the comments are
-					// "inside" the buffer and the buffer can't be
-					// tossed out.
-					if ($comment_count > 0) {
-						$contains_comment = true;
-					}
-			}
-		}
-		// If it's got preserved comments that happened INSIDE the
-		// buffer, put back the buffer and keep the whole block.
-		if ($contains_comment) {
-			array_splice($output, count($output), 0, $buffer);
+	/*
+	 * Remove unnecessary semicolons.
+	 */
+	private function collapse_semicolons($css) {
+		// Replace any runs of semicolons with a single semicolon.
+		$css = preg_replace('#;+#', ';', $css);
 		
-		// Otherwise, get rid of the braces and discard the buffer.
-		} else {
-			array_pop($output);
-			array_pop($output);
-			// If it's got preserved comments that were OUTSIDE
-			// the buffer, output just those. All we care about
-			// right now is how many there are, 'cause they're all
-			// the same until they get repopulated.
-			$this->flush_comments($output, $comment_count);
-		}
+		// Strip semicolons before closing braces.
+		$css = preg_replace('#;\}#', '}', $css);
+
+		return $css;
 	}
-
-	// Decide where to remove white space and comments.
-	private function spaces(&$input) {
-		// Keep track of some contexts we might be inside of.
-		$in_at = false;
-		$inside = [];
-		$PAREN = 0;
-		$CALC  = 1;
-		$NTH   = 2;
-
-		// A pattern for matching six-hex colors that could be three-hex.
-		$color = '#([0-9a-f])\1([0-9a-f])\2([0-9a-f])\3#';
 	
-		// Strip whitespace from the beginning and end,
-		// and keep the array reversed so we can pop instead of shift.
-		$this->strip($input);
-		$input = array_reverse($input);
-		$this->strip($input);
-	
-		$output = [];
-		while ($input) {
-			$token = array_pop($input);
+	/*
+	 * Strip spaces and do other replacements that can only happen in certain
+	 * contexts.
+	 */
+	private function do_contextual_replacements($css) {
+		$me = $this;
+
+		// In declarations and @-rules, strip spaces around colons, stars, and slashes.
+		$half = '[^:;{}]+';
+		$declaration = '(?:(?<=[;{}])' . $half . ':' . $half . '(?=[;}]))';
+		$at_rule = '@.+?(?=\{)';
+		$either = '#' . $declaration . '|' . $at_rule . '#s';
+		$css = preg_replace_callback($either, function ($matches) use ($me) {
+			return $me->strip($matches[0], '[:*/]', true, true);
+		}, $css);
 		
-			// First track what context we're currently inside.
-			switch ($token) {
-				case '@':
-					$in_at = true;
-					break;
-				
-				case '{':
-					$in_at = false;
-					// no break
-				case '[':
-					$inside[] = $token;
-					break;
-
-				case '(':
-					$end = strtolower(end($output));
-					$prev = prev($output);
-					if ('calc' === $end || $CALC === end($inside)) {
-						$inside[] = $CALC;
-					} else if (':' === $prev && 'nth-' === substr($end, 0, 4)) {
-						$inside[] = $NTH;
-					} else {
-						// We'll never check against this, but we need to push 
-						// *something* for its closing paren to pop off.
-						$inside[] = $PAREN;
-					}
-					break;
-				
-				// tokenize() has already ensured that the thing that's open
-				// is the thing being closed here, so we don't need to check.
-				case ')':
-				case ']':
-				case '}':
-					array_pop($inside);
-			}
-
-			// Then decide whether to strip any spaces on either side
-			// of the current token.
-			switch ($token) {
-				// Strip whitespace around colons outside selectors.
-				case ':':
-					// If it's in an @-rule, or if the next open brace comes
-					// after the next closing brace or semicolon, then it's 
-					// not in a selector, so strip the whitespace.
-					if ($in_at || '{' !== $this->nearest($input, '{};')) {
-						$this->strip($input);
-						$this->strip($output);
-					}
-					break;
-
-				case '#':
-					// This one isn't about spaces, but it's piggybacking 
-					// here because it needs to know where we are.
-					// If we're not in a selector (or an @-rule incidentally),
-					// this is a color.
-					if ('{' !== $this->nearest($input, '{};')) {
-						// Reduce it from six hex digits to three if possible.
-						if (preg_match($color, strtolower(end($input)), $matches)) {
-							array_pop($input);
-							$token .= $matches[1] . $matches[2] . $matches[3];
-						}
-					}
-					break;
-				
-				// Strip whitespace to the right of these.
-				case '[':
-				case '(':
-					$this->strip($input);
-					break;
+		// Stash attribute selectors
+		$attributes = [];
+		$css = preg_replace_callback('#\[.+?\]#s', function ($matches) use ($me, &$attributes) {
+			$att = $matches[0];
+			// Also strip spaces from around operators: ~= ^= |= *= $=
+			// but leave space inside malformed ones untouched: ~ =
+			$att = $me->strip($att, '[~^|*$]\s*=', true, true);
 			
-				// Strip whitespace to the left of these.
-				case ']':
-				case ')':
-					$this->strip($output);
-					break;
+			// Strip spaces from both sides of equals signs that are preceded
+			// by a word character.
+			$att = preg_replace('#(?<=\w)\s*=\s*#s', '=', $att);
 			
-				// Strip whitespace on both sides of these.
-				case ' ':
-				case ';':
-				case '{':
-				case '}':
-				case ',':
-				case '>':
-					$this->strip($input);
-					$this->strip($output);
-					break;
+			$attributes[] = $att;
+			return '[_]';
 
-				// Strip whitespace around `-` tokens only inside :nth-X()
-// Commented out because it's handled in the default case,
-// but could still be useful to see.
-// 				case '-':
-// 					if ($NTH === end($inside)) {
-// 						$this->strip($input);
-// 						$this->strip($output);
-// 					}
-// 					break;
+			// Note: Identifiers get unquoted during unstashing.
+		}, $css);
 
-				// Strip whitespace around `+` tokens only outside calc()
-				case '+':
-					if ($CALC !== end($inside)) {
-						$this->strip($input);
-						$this->strip($output);
-					}
-					break;
-			
-				// Don't fix malformed equality operators inside brackets.
-				case '~':
-					// Always strip spaces from the left of a tilde,
-					// but only strip them from the right if it's
-					// outside of brackets or the next closing bracket
-					// is closer than the next equals.
-					$this->strip($output);
-					if (
-						'[' !== end($inside) || 
-						']' === $this->nearest($input, ']=')
-					) {
-						$this->strip($input);
-					}
-					break;
-				case '^':
-				case '|':
-				case '$':
-					// Only strip whitespace to the left of these,
-					// and only inside brackets. 
-					if ('[' === end($inside)) {
-						$this->strip($output);
-					}
-					break;
-				case '*':
-					switch (end($inside)) {
-						// Strip spaces only to the left inside brackets
-						case '[':
-							$this->strip($output);
-							break;
-						// Strip spaces on both sides in calc
-						case $CALC:
-							$this->strip($input);
-							$this->strip($output);
-					}
-					break;
-				case '/':
-					// Strip spaces on both sides in calc
-					if ($CALC === end($inside)) {
-						$this->strip($input);
-						$this->strip($output);
-					}
-					break;
+		// Inside selectors, strip spaces around <+~
+		// Match selectors by looking back to the last end of something -- a
+		// semicolon, open, or closing brace -- and finding everything that
+		// isn't an @, non-greedy, until the next character is a brace.
+		$css = preg_replace_callback('#(?<=[;{}]|^)[^@]+?(?=\{)#s', function ($matches) use ($me) {
+			return $me->strip($matches[0], '[>+~]', true, true);
+		}, $css);
+		
+		// Un-stash attribute selectors
+		$i = 0;
+		$css = preg_replace_callback('#\[_\]#', function ($matches) use (&$attributes, &$i) {
+			return $attributes[$i++];
+		}, $css);
+		
+		// Remove spaces around + and - inside nth-X()
+		$css = preg_replace_callback('#(:nth-[\w-]+\(-?)(.+?)(\)|of)#s', function ($matches) use ($me) {
+			return $matches[1] . $me->strip($matches[2], '[+-]', true, true) . $matches[3];
+		}, $css);
+		
+		return $css;
+	}
+	
+	/*
+	 * Replace colors with shorter values for the same color.
+	 */
+	private function shorten_colors($name, $value) {
+		return preg_replace_callback('/#([0-9a-f])\1([0-9a-f])\2([0-9a-f])\3/i', function ($matches) {
+			return '#' . strtolower($matches[1] . $matches[2] . $matches[3]);
+		}, $value);
+	}
+	
+	/*
+	 * Repopulate strings and preserved comments.
+	 */
+	private function unstash_strings_and_comments($css) {
+		// Optionally match an equals before the string,
+		// for unquoting identifiers.
+		$string = '=?"_"';
+		
+		// Safe characters before and/or after a preserved comment mean
+		// it can have line breaks.
+		$safe = '[ ,;{}]?';
+		$comment = '(' . $safe . ')(/\*_\*/)(' . $safe . ')';
+
+		// Build a pattern that matches comments, strings, and declarations.
+		$either = '#' . $comment . '|' . $string . '#s';
+		
+		$me = $this;
+		$css = preg_replace_callback($either, function ($matches) use ($me, $comment, $filter) {
+			$full = $matches[0];
+			// Strip everything except the index number.
+			switch (substr($full, 0, 1)) {
+				// Unquote identifiers after equals.
 				case '=':
-					// Always strip spaces from the right of an equals,
-					// but only strip them from the left if it's
-					// outside of brackets or the previous opening
-					// bracket is closer than the previous character
-					// that might be part of a malformed operator.
-					$this->strip($input);
-					if (
-						'[' !== end($inside) ||
-						'[' === $this->nearest($output, '[~^|*$')
-					) {
-						$this->strip($output);
+					$str = $me->strings[$me->s++];
+					$content = substr($str, 1, strlen($str) - 2);
+					if (preg_match('#^[_a-z][-0-9_a-z]*$#i', $content)) {
+						$str = $content;
 					}
-					break;
-
+					return '=' . $str;
+				
+				// Other strings get returned as they are.
+				case '"':
+					return $me->strings[$me->s++];
+					
+				// Comments 
 				default:
-					switch (end($inside)) {
-						// Strip whitespace inside :nth-X(...) 
-						case $NTH:
-							$this->strip($input);
-							break;
-						// Inside brackets, strip quotes from values that start
-						// with a word character and 
-						case '[':
-							if ('=' === end($output)) {
-								switch (substr($token, 0, 1)) {
-									case '"':
-									case "'":
-										$content = substr($token, 1, count($token) - 2);
-										if (preg_match('#^[_a-z][-0-9_a-z]*$#i', $content)) {
-											$token = $content;
-										}
-								}
-							}
-					}
-			}
+					// Do some minimal formatting. Strip whitespace from the
+					// front of each line, then put back a single space on lines
+					// that begin with a star.
+					$restore = $me->comments[$me->c++];
+					$restore = preg_replace('#[\r\n]\s*#s', "\n", $restore);
+					$restore = preg_replace('#\n\*#s', "\n *", $restore);
 
-			$output[] = $token;
+					// Insert line breaks around comments that adjoin
+					// whitespace-safe characters.
+					$before = $matches[1];
+					$after = $matches[3];
+					if ($before || $after) {
+						$before = trim($before) . "\n";
+						$after = "\n" . trim($after);
+					}
+					return $before . $restore . $after;
+			}
+		}, $css);
+		
+		return $css;
+	}
+
+	/*
+	 * Strip empty comments and spaces adjoining the provided character class,
+	 * to the left, the right, or both.
+	 */
+	private function strip($css, $chars, $left, $right) {
+		$strip = '(?:\s|/\*\*/)';
+		$strip_one = $strip . '+';
+		$strip_both = $strip . '*';
+		if ($left && $right) {
+			$css = preg_replace('#' . $strip_both . '(' . $chars . ')' . $strip_both . '#s', '\\1', $css);
+		} else if ($left) {
+			$css = preg_replace('#' . $strip_one . '(' . $chars . ')#s', '\\1', $css);
+		} else if ($right) {
+			$css = preg_replace('#(' . $chars . ')' . $strip_one . '#s', '\\1', $css);
 		}
-		return $output;
+		return $css;
 	}
 	
-	// Strip whitespace from the end of the input or output,
-	// preserving comments with empty strings.
-	private function strip(&$array) {
-		// Keep track of how many preserved comments are encountered,
-		// then add them back at the end.
-		$comment_count = 0;
-		while ($array) {
-			switch ($token = array_pop($array)) {
-				case ' ':
-				case '/**/':
-					break;
-				case '/*_*/':
-					$comment_count++;
-					break;
-				default:
-					$array[] = $token;
-					break 2;
-			}
-		}
-		if ($comment_count > 0) {
-			$this->flush_comments($array, $comment_count);
-		}
-	}
-	
-	// The character from $needles that appears closest to the end of $haystack.
-	private function nearest(&$haystack, $needles) {
-		$needles = str_split($needles);
-		for ($i = count($haystack) - 1; $i >= 0; $i--) {
-			// This looks backwards because in_array's arguments are
-			// ($needle, $haystack), but we're looking for a specific
-			// *member* of $haystack in the *array* of $needles to find
-			// which of those needles appears first in $haystack.
-			if (in_array($haystack[$i], $needles)) {
-				return $haystack[$i];
-			}
-		}
-		return false;
-	}
-
-	// Re-insert the number of preserved comments that were counted.
-	private function flush_comments(&$array, &$n) {
-		while (0 < $n--) {
-			$array[] = '/*_*/';
-		}
-	}
-	
-	// Replace preserved comment placeholders with real comments.
-	// This is unlike other methods in that it operates directly on the $input
-	// array instead of returning a new $output array.
-	private function comments(&$input) {
-		// Tokens that are always safe to add whitespace next to.
-		$tokens_safe = [' ', ',', ';', '{', '}'];
-		$preserved = '/*_*/';
-	
-		// An array to put the replacement comments in before really replacing
-		// them, so that the loop can still look back at the previous token.
-		$replace = [];
-
-		$n = 0;
-		$last = count($input) - 1;
-		for ($i = 0; $i <= $last; $i++) {
-			$token = $input[$i];
-
-			// On each preserved comment token we find...
-			if ($preserved === $token) {
-				// Get the next stashed real comment.
-				$comment = $this->comments[$n++];
-
-				// Do some minimal formatting. Strip whitespace from the front
-				// of each line, then put back a single space on lines that
-				// begin with a star.
-				$comment = preg_replace('#[\r\n]\s*#s', "\n", $comment);
-				$comment = preg_replace('#\n\*#s', "\n *", $comment);
-
-				// Pad the comment.
-				$pad_head = '';
-				$pad_tail = '';
-				$offset = 0;
-				while (1) {
-					$offset++;
-					$prev = $i - $offset;
-					$next = $i + $offset;
-					// If the comment is at the front, only pad the end.
-					if ($prev < 0) {
-						$pad_tail = "\n";
-						break;
-					}
-					// If the comment is at the end, only pad the front.
-					if ($next > $last) {
-						$pat_head = "\n";
-						break;
-					}
-					// If the previous or next token is safe, pad the front.
-					if (in_array($input[$prev], $tokens_safe)
-						|| in_array($input[$next], $tokens_safe)
-					) {
-						$pad_head = "\n";
-						// If the next token is not a comment,
-						// also pad the end.
-						if ($preserved !== $input[$next]) {
-							$pad_tail = "\n";
-						}
-						break;
-					}
-					// If the previous and next tokens aren't comments
-					// (and we know they aren't safe characters either)
-					// stop looking.
-					if ($preserved !== $input[$prev] &&
-						$preserved !== $input[$next]
-					) {
-						break;
-					}
-				}
-				$replace[$i] = $pad_head . $comment . $pad_tail;
-			}
-		}
-		foreach ($replace as $i => $comment) {
-			$input[$i] = $replace[$i];
-		}
-	}
 }

@@ -1,0 +1,6 @@
+a::before {
+	content: '123';
+}
+b::after {
+	content: "456";
+}
