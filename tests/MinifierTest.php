@@ -120,13 +120,21 @@ class MinifierTest extends \PHPUnit\Framework\TestCase {
 		$prefix = __DIR__ . '/test-data/_special/filter';
 		$exp = file_get_contents($prefix . '/exp.css');
 		$src = file_get_contents($prefix . '/src.css');
-		$result = $this->minify($src, ['filter' => function ($css, &$strings) {
-			$css = preg_replace('#\bb\b#', 'strong', $css);
-			foreach ($strings as $i => $v) {
-				$strings[$i] = strrev($strings[$i]);
+		$result = $this->minify($src, [
+			'comments' => function ($comment) {
+				return $comment;
+			},
+			'filter' => function ($css, &$strings, &$comments) {
+				$css = preg_replace('#\bb\b#', 'strong', $css);
+				foreach ($strings as $i => $v) {
+					$strings[$i] = strrev($strings[$i]);
+				}
+				foreach ($comments as $i => $v) {
+					$comments[$i] = strrev($comments[$i]);
+				}
+				return $css;
 			}
-			return $css;
-		}]);
+		]);
 		$this->assertEquals($exp, $result);
 	}
 

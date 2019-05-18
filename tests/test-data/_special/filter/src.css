@@ -1,6 +1,8 @@
+/* abc */
 a::before {
 	content: '123';
 }
+/* def */
 b::after {
 	content: "456";
 }

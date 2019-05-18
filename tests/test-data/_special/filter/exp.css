@@ -1,1 +1,4 @@
-a::before{content:'321'}strong::after{content:"654"}
+/* cba */
+a::before{content:'321'}
+/* fed */
+strong::after{content:"654"}

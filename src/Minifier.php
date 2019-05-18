@@ -4,7 +4,7 @@ namespace ThomasPeri\YaCSSMin;
 /**
  * Yet Another CSS Minifier
  * @author Thomas Peri <tjperi@gmail.com>
- * @version 0.7.0
+ * @version 0.7.1
  * @license MIT
  */
 class Minifier {
@@ -46,7 +46,9 @@ class Minifier {
 		// Pass through the user filter if callable.
 		$filter = $options['filter'];
 		if (is_callable($filter)) {
-			$css = $filter($css, $min->strings, $min->$comments);
+			$css = $filter($css, $min->strings, $min->comments);
+			$min->strings = array_values($min->strings);
+			$min->comments = array_values($min->comments);
 		}
 		
 		// Re-populate the stashed strings and comments.
