@@ -47,6 +47,9 @@ class Minifier {
 		$filter = $options['filter'];
 		if (is_callable($filter)) {
 			$css = $filter($css, $min->strings, $min->comments);
+			
+			// to-do: write tests where items get removed
+			
 			$min->strings = array_values($min->strings);
 			$min->comments = array_values($min->comments);
 		}
@@ -304,7 +307,7 @@ class Minifier {
 		$either = '#' . $comment . '|' . $string . '#s';
 		
 		$me = $this;
-		$css = preg_replace_callback($either, function ($matches) use ($me, $comment, $filter) {
+		$css = preg_replace_callback($either, function ($matches) use ($me, $comment) {
 			$full = $matches[0];
 			// Strip everything except the index number.
 			switch (substr($full, 0, 1)) {
