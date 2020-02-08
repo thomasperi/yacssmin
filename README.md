@@ -104,7 +104,7 @@ $minified_css = Minifier::minify($css, [
             $pattern,
             function ($matches) use (&$i, &$strings, $rewrite) {
                 $match = $matches[0];
-                switch ($match) {
+                switch (strtolower($match)) {
                     // Skip over strings that aren't URLs, but count them.
                     case '"_"':
                         $i++;
